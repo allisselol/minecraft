@@ -115,7 +115,7 @@ void Game::killChicken(size_t index) {
     }
 
     sounds.playChickenDeath(); // звук гибели курицы
-    hud.setFood(hud.getFood() + FOOD_PER_CHICKEN);
+    inventory.addItem(BlockType::RAW_CHICKEN, FOOD_PER_CHICKEN); // сырое мясо — есть сырым или приготовить в печи
 
     chickens.erase(chickens.begin() + index);
 }
@@ -216,7 +216,19 @@ void Game::handleEvents() {
 
         if (const auto* kp = event->getIf<sf::Event::KeyPressed>()) {
             if (kp->code == sf::Keyboard::Key::E) {
-                inventoryOpen = !inventoryOpen;
+                if (workbenchOpen) {
+                    // E закрывает верстак — всё из сетки возвращается в инвентарь
+                    inventory.closeWorkbenchScreen();
+                    workbenchOpen = false;
+                } else if (furnaceOpen) {
+                    inventory.closeFurnaceScreen();
+                    furnaceOpen = false;
+                } else if (chestOpen) {
+                    // E закрывает открытый сундук, как и крестик
+                    chestOpen = false;
+                } else {
+                    inventoryOpen = !inventoryOpen;
+                }
                 player.handleKeyReleased(sf::Keyboard::Key::A);
                 player.handleKeyReleased(sf::Keyboard::Key::D);
             }
@@ -228,7 +240,7 @@ void Game::handleEvents() {
             if (kp->code == sf::Keyboard::Key::Num4) inventory.selectSlot(3);
             if (kp->code == sf::Keyboard::Key::Num5) inventory.selectSlot(4);
 
-            if (!inventoryOpen) {
+            if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
                 if (kp->code == sf::Keyboard::Key::A ||
                     kp->code == sf::Keyboard::Key::D ||
                     kp->code == sf::Keyboard::Key::W ||
@@ -241,16 +253,51 @@ void Game::handleEvents() {
             player.handleKeyReleased(kr->code);
 
         if (const auto* mb = event->getIf<sf::Event::MouseButtonPressed>()) {
-            if (!inventoryOpen) {
+            if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
                 handleBlockInteraction(mb->button, sf::Vector2i(mb->position.x, mb->position.y));
-            } else if (mb->button == sf::Mouse::Button::Left) {
+            } else {
                 // Инвентарь рисуется в фиксированной системе 800x600, а клик приходит
                 // в реальных пикселях окна. В полноэкранном режиме окно больше 800x600,
                 // поэтому пиксель клика нужно перевести в координаты UI-вида.
                 sf::View uiView(sf::FloatRect({0.f, 0.f}, {800.f, 600.f}));
                 sf::Vector2f uiPos = window.mapPixelToCoords({mb->position.x, mb->position.y}, uiView);
                 sf::Vector2i mpos((int)uiPos.x, (int)uiPos.y);
-                if (inventory.handleCloseClick(mpos)) {
+
+                if (workbenchOpen) {
+                    // У сетки верстака работают и ЛКМ (взять/положить/слить/поменять целую
+                    // стопку), и ПКМ (взять половину стопки или положить один предмет).
+                    if (mb->button == sf::Mouse::Button::Left && inventory.handleWorkbenchCloseClick(mpos)) {
+                        inventory.closeWorkbenchScreen();
+                        workbenchOpen = false;
+                    } else if (mb->button == sf::Mouse::Button::Left || mb->button == sf::Mouse::Button::Right) {
+                        if (inventory.handleWorkbenchClick(mpos, mb->button))
+                            sounds.playDig(BlockType::WOOD); // звук перекладывания/крафта
+                    }
+                } else if (furnaceOpen) {
+                    // То же самое (ЛКМ/ПКМ), только слоты — сырьё/топливо/результат этой печи
+                    if (mb->button == sf::Mouse::Button::Left && inventory.handleFurnaceCloseClick(mpos)) {
+                        inventory.closeFurnaceScreen();
+                        furnaceOpen = false;
+                    } else if (mb->button == sf::Mouse::Button::Left || mb->button == sf::Mouse::Button::Right) {
+                        auto it = furnaceStorage.find(openFurnacePos);
+                        if (it == furnaceStorage.end()) {
+                            furnaceOpen = false; // печь куда-то делась (не должно случаться)
+                        } else if (inventory.handleFurnaceClick(mpos, it->second.slots, mb->button)) {
+                            sounds.playDig(BlockType::WOOD);
+                        }
+                    }
+                } else if (mb->button != sf::Mouse::Button::Left) {
+                    // остальные окна (инвентарь, сундук) реагируют только на ЛКМ
+                } else if (chestOpen) {
+                    auto it = chestStorage.find(openChestPos);
+                    if (it == chestStorage.end()) {
+                        chestOpen = false; // сундук куда-то делся (не должно случаться) — просто закрываем
+                    } else if (inventory.handleChestCloseClick(mpos)) {
+                        chestOpen = false;
+                    } else if (inventory.handleChestClick(mpos, it->second)) {
+                        sounds.playDig(BlockType::WOOD); // звук перекладывания вещей
+                    }
+                } else if (inventory.handleCloseClick(mpos)) {
                     inventoryOpen = false; // клик по крестику закрывает инвентарь
                 } else if (inventory.handleCraftClick(mpos)) {
                     sounds.playDig(BlockType::STONE); // временный звук "крафта"
@@ -349,6 +396,52 @@ void Game::armTnt(int bx, int by, float fuse) {
         p.maxLifetime = 0.25f + (float)(rand() % 20) / 100.f;
         p.lifetime    = p.maxLifetime;
         particles.push_back(p);
+    }
+}
+
+void Game::updateFurnaces(float deltaTime) {
+    for (auto& kv : furnaceStorage) {
+        FurnaceState& f = kv.second;
+        InventorySlot& in   = f.slots[0];
+        InventorySlot& fuel = f.slots[1];
+        InventorySlot& out  = f.slots[2];
+
+        BlockType smeltResult;
+        float cookTime;
+        bool hasRecipe = in.count > 0 && getSmeltResult(in.type, smeltResult, cookTime);
+        bool outputFits = (out.type == BlockType::AIR || out.count <= 0) ||
+                           (out.type == smeltResult && out.count < 64);
+        bool canSmelt = hasRecipe && outputFits;
+
+        if (canSmelt) {
+            if (f.burnTimeLeft <= 0.f) {
+                float fuelSeconds = getFuelBurnSeconds(fuel.type);
+                if (fuel.count > 0 && fuelSeconds > 0.f) {
+                    fuel.count--;
+                    if (fuel.count <= 0) { fuel.count = 0; fuel.type = BlockType::AIR; }
+                    f.burnTimeLeft = f.burnTimeMax = fuelSeconds;
+                }
+            }
+
+            if (f.burnTimeLeft > 0.f) {
+                f.burnTimeLeft = std::max(0.f, f.burnTimeLeft - deltaTime);
+                f.cookProgress += deltaTime;
+
+                if (f.cookProgress >= cookTime) {
+                    f.cookProgress -= cookTime;
+                    in.count--;
+                    if (in.count <= 0) { in.count = 0; in.type = BlockType::AIR; }
+                    if (out.type == BlockType::AIR || out.count <= 0) {
+                        out.type = smeltResult;
+                        out.count = 0;
+                    }
+                    out.count = std::min(64, out.count + 1);
+                }
+            }
+        } else {
+            // Готовить нечего или некуда — прогресс сбрасывается (топливо не тратится впустую)
+            f.cookProgress = 0.f;
+        }
     }
 }
 
@@ -529,10 +622,69 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
                 sounds.playDig(block.type);
                 spawnBreakParticles(bx, by, block);
                 inventory.addItem(block.type, 1); // добытый блок отправляется в инвентарь
+                if (block.type == BlockType::CHEST) {
+                    // Ломаем сундук — всё, что в нём лежало, высыпаем игроку в инвентарь
+                    auto it = chestStorage.find({bx, by});
+                    if (it != chestStorage.end()) {
+                        for (auto& slot : it->second)
+                            if (slot.type != BlockType::AIR && slot.count > 0)
+                                inventory.addItem(slot.type, slot.count);
+                        chestStorage.erase(it);
+                    }
+                }
+                if (block.type == BlockType::FURNACE) {
+                    // Ломаем печь — сырьё, топливо и уже готовый результат высыпаются игроку
+                    auto it = furnaceStorage.find({bx, by});
+                    if (it != furnaceStorage.end()) {
+                        for (auto& slot : it->second.slots)
+                            if (slot.type != BlockType::AIR && slot.count > 0)
+                                inventory.addItem(slot.type, slot.count);
+                        furnaceStorage.erase(it);
+                    }
+                }
                 world.setBlock(bx, by, BlockType::AIR);
             }
         }
     } else if (button == sf::Mouse::Button::Right) {
+        Block clicked = world.getBlock(bx, by);
+        if (clicked.type == BlockType::WORKBENCH) {
+            // Открываем настоящую сетку 3x3 — как у верстака в оригинале
+            workbenchOpen = true;
+            return;
+        }
+        if (clicked.type == BlockType::CHEST) {
+            std::pair<int, int> key(bx, by);
+            if (chestStorage.find(key) == chestStorage.end())
+                chestStorage[key] = std::vector<InventorySlot>(CHEST_SLOT_COUNT, InventorySlot(BlockType::AIR, 0));
+            chestOpen = true;
+            openChestPos = key;
+            return;
+        }
+        if (clicked.type == BlockType::FURNACE) {
+            std::pair<int, int> key(bx, by);
+            furnaceStorage[key]; // создаёт пустое состояние печи при первом открытии, если его ещё нет
+            furnaceOpen = true;
+            openFurnacePos = key;
+            return;
+        }
+
+        // Открытие контейнеров — в приоритете. Если клик пришёлся не по ним, но в руке
+        // еда — едим её вместо попытки "поставить" как блок (есть можно, глядя куда угодно).
+        if (inventory.hasSelected()) {
+            BlockType selType = inventory.getSelectedType();
+            Block selBlock(selType);
+            if (selBlock.isFood()) {
+                hud.setFood(hud.getFood() + selBlock.getFoodValue());
+                inventory.consumeSelected();
+                sounds.playDig(BlockType::WOOD); // временный звук еды
+                return;
+            }
+            if (selBlock.isItem()) {
+                // слитки и прочие "предметы" нельзя поставить как блок в мир
+                return;
+            }
+        }
+
         if (!world.getBlock(bx, by).isSolid() && inventory.hasSelected()) {
             BlockType t = inventory.getSelectedType();
             if (t == BlockType::TORCH)      sounds.playFuse();   // потрескивание факела
@@ -545,7 +697,7 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
 }
 
 void Game::update(float deltaTime) {
-    if (!inventoryOpen) {
+    if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
         player.update(deltaTime, world);
         if (player.didJustEnterWater()) sounds.playSplash(); // плеск при входе в воду
     }
@@ -553,6 +705,7 @@ void Game::update(float deltaTime) {
     updateParticles(deltaTime);
     world.updateFallingBlocks(deltaTime);
     updateExplosives(deltaTime);
+    updateFurnaces(deltaTime);
     animTime += deltaTime;
 
     dayTime += deltaTime;
@@ -571,7 +724,7 @@ void Game::update(float deltaTime) {
     }
 
     // Враги: преследуют игрока, бьют вблизи
-    if (!inventoryOpen) {
+    if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
         float pcx = player.getX() + player.getWidth()  / 2.f;
         float pcy = player.getY() + player.getHeight() / 2.f;
         for (auto& e : enemies) {
@@ -653,7 +806,7 @@ void Game::update(float deltaTime) {
         }
     }
 
-    if (!inventoryOpen) {
+    if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
         hud.update(deltaTime);
 
         float fallDamage = player.takeFallDamage();
@@ -991,6 +1144,31 @@ void Game::render() {
                 }
             }
 
+            // Горящая печь — маленький огонёк в её "пасти" + источник света в темноте
+            if (block.type == BlockType::FURNACE) {
+                auto fit = furnaceStorage.find({x, y});
+                bool lit = (fit != furnaceStorage.end() && fit->second.burnTimeLeft > 0.f);
+                if (lit) {
+                    float cx = px + BLOCK_SIZE / 2.f;
+                    float flicker = 0.8f + 0.2f * std::sin(animTime * 14.f + (x * 13 + y * 7));
+                    float mouthY = py + BLOCK_SIZE * 0.6f; // примерно где тёмное отверстие на текстуре печи
+
+                    sf::CircleShape glow(5.f * flicker);
+                    glow.setOrigin({5.f * flicker, 5.f * flicker});
+                    glow.setPosition({cx, mouthY});
+                    glow.setFillColor(sf::Color(255, 140, 40, 220));
+                    window.draw(glow);
+
+                    sf::CircleShape core(2.5f * flicker);
+                    core.setOrigin({2.5f * flicker, 2.5f * flicker});
+                    core.setPosition({cx, mouthY});
+                    core.setFillColor(sf::Color(255, 220, 140, 230));
+                    window.draw(core);
+
+                    lightSources.push_back({cx, py + BLOCK_SIZE / 2.f});
+                }
+            }
+
             // Травинки над блоком травы — покачиваются от "ветра", если сверху воздух
             if (block.type == BlockType::GRASS) {
                 bool topAir = !world.inBounds(x, y - 1) || !world.getBlock(x, y - 1).isSolid();
@@ -1091,8 +1269,26 @@ void Game::render() {
     inventory.draw(window);
     hud.draw(window);
 
-    if (inventoryOpen)
+    if (workbenchOpen) {
+        inventory.drawWorkbenchScreen(window);
+    } else if (furnaceOpen) {
+        auto it = furnaceStorage.find(openFurnacePos);
+        if (it != furnaceStorage.end()) {
+            float burnFrac = (it->second.burnTimeMax > 0.f) ? (it->second.burnTimeLeft / it->second.burnTimeMax) : 0.f;
+            BlockType dummyResult; float cookTime = 1.f;
+            const InventorySlot& in = it->second.slots[0];
+            float cookFrac = 0.f;
+            if (in.count > 0 && getSmeltResult(in.type, dummyResult, cookTime) && cookTime > 0.f)
+                cookFrac = it->second.cookProgress / cookTime;
+            inventory.drawFurnaceScreen(window, it->second.slots, burnFrac, cookFrac);
+        }
+    } else if (chestOpen) {
+        auto it = chestStorage.find(openChestPos);
+        if (it != chestStorage.end())
+            inventory.drawChestScreen(window, it->second);
+    } else if (inventoryOpen) {
         inventory.drawFullScreen(window);
+    }
 
     window.display();
 }

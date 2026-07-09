@@ -22,7 +22,17 @@ enum class BlockType {
     SANDSTONE,
     PUMPKIN,
     BOOKSHELF,
-    OBSIDIAN
+    OBSIDIAN,
+    WORKBENCH,
+    CHEST,
+    FURNACE,
+
+    // Эти четыре — не настоящие блоки, а предметы (еда и слитки из печи).
+    // Их нельзя поставить в мир, только держать в инвентаре.
+    RAW_CHICKEN,
+    COOKED_CHICKEN,
+    IRON_INGOT,
+    GOLD_INGOT
 };
 
 struct Block {
@@ -31,13 +41,29 @@ struct Block {
     Block() : type(BlockType::AIR) {}
     Block(BlockType t) : type(t) {}
 
+    // "Предметные" типы (еда, слитки) — не блоки, никогда не встречаются в мире
+    bool isItem() const {
+        return type == BlockType::RAW_CHICKEN || type == BlockType::COOKED_CHICKEN ||
+               type == BlockType::IRON_INGOT   || type == BlockType::GOLD_INGOT;
+    }
+
     bool isSolid() const {
-        return type != BlockType::AIR && type != BlockType::TORCH && type != BlockType::WATER;
+        return type != BlockType::AIR && type != BlockType::TORCH && type != BlockType::WATER && !isItem();
     }
 
     bool isWater() const {
         return type == BlockType::WATER;
     }
+
+    // Сколько сытости восстанавливает предмет, если его съесть (0 — это не еда)
+    int getFoodValue() const {
+        switch (type) {
+            case BlockType::RAW_CHICKEN:    return 2;
+            case BlockType::COOKED_CHICKEN: return 5; // приготовленное мясо сытнее сырого
+            default:                        return 0;
+        }
+    }
+    bool isFood() const { return getFoodValue() > 0; }
 
     // Блоки, которые падают под действием "гравитации", если под ними пусто
     bool isFalling() const {
@@ -66,6 +92,13 @@ struct Block {
             case BlockType::PUMPKIN:   return sf::Color(210, 125, 30);
             case BlockType::BOOKSHELF: return sf::Color(120, 85, 55);
             case BlockType::OBSIDIAN:  return sf::Color(30, 26, 45);
+            case BlockType::WORKBENCH: return sf::Color(137, 101, 60);
+            case BlockType::CHEST:     return sf::Color(109, 74, 38);
+            case BlockType::FURNACE:   return sf::Color(115, 115, 115);
+            case BlockType::RAW_CHICKEN:    return sf::Color(235, 180, 170);
+            case BlockType::COOKED_CHICKEN: return sf::Color(180, 120, 60);
+            case BlockType::IRON_INGOT:     return sf::Color(220, 220, 225);
+            case BlockType::GOLD_INGOT:     return sf::Color(250, 210, 60);
             default:                return sf::Color::Transparent;
         }
     }
@@ -134,8 +167,36 @@ struct Block {
             case BlockType::IRON_ORE:    index = 23; break; // камень с бежевыми вкраплениями
             case BlockType::GOLD_ORE:    index = 24; break; // камень с жёлтыми вкраплениями
             case BlockType::DIAMOND_ORE: index = 25; break; // камень с голубыми вкраплениями
+            case BlockType::WORKBENCH:   index = 20; break; // верстак (уже был в атласе)
+            case BlockType::CHEST:       index = 30; break; // сундук
+            case BlockType::FURNACE:     index = 21; break; // печь (уже была в атласе)
             default:                index = 1; break;
         }
         return sf::IntRect({index * TEXTURE_SIZE, 0}, {TEXTURE_SIZE, TEXTURE_SIZE});
     }
 };
+
+// === Печь: что из чего плавится и что можно жечь как топливо ===
+// Вынесено свободными функциями (а не в Block), чтобы одинаково использовать
+// и в Game (симуляция готовки), и в Inventory (отрисовка окна печи).
+
+// Есть ли рецепт плавки для этого сырья; если да — возвращает результат и время готовки (в секундах)
+inline bool getSmeltResult(BlockType input, BlockType& outResult, float& outCookTime) {
+    switch (input) {
+        case BlockType::RAW_CHICKEN: outResult = BlockType::COOKED_CHICKEN; outCookTime = 5.f; return true;
+        case BlockType::IRON_ORE:    outResult = BlockType::IRON_INGOT;     outCookTime = 6.f; return true;
+        case BlockType::GOLD_ORE:    outResult = BlockType::GOLD_INGOT;     outCookTime = 6.f; return true;
+        default: return false;
+    }
+}
+
+// Сколько секунд горит ОДНА единица топлива такого типа (0 — не топливо)
+inline float getFuelBurnSeconds(BlockType fuel) {
+    switch (fuel) {
+        case BlockType::COAL_ORE: return 16.f; // уголь — самое долгоиграющее топливо
+        case BlockType::WOOD:     return 8.f;
+        case BlockType::PLANKS:   return 4.f;
+        default:                  return 0.f;
+    }
+}
+inline bool isFuel(BlockType t) { return getFuelBurnSeconds(t) > 0.f; }

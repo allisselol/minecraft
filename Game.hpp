@@ -1,6 +1,8 @@
 #pragma once
 #include <SFML/Graphics.hpp>
 #include <vector>
+#include <map>
+#include <utility>
 #include "World.hpp"
 #include "Player.hpp"
 #include "Inventory.hpp"
@@ -20,6 +22,35 @@ private:
     SoundManager     sounds;
     HUD              hud;
     bool             inventoryOpen;
+
+    // === Сундуки ===
+    // Содержимое каждого поставленного сундука хранится отдельно от блока в мире,
+    // по его координатам (bx, by). Появляется в момент первого открытия.
+    static constexpr int CHEST_SLOT_COUNT = 27; // 3 ряда по 9, как маленький сундук в оригинале
+    std::map<std::pair<int, int>, std::vector<InventorySlot>> chestStorage;
+    bool chestOpen = false;
+    std::pair<int, int> openChestPos{-1, -1};
+
+    // === Верстак ===
+    // Само окно (сетка 3x3) верстак не хранит по координатам — как и в оригинале,
+    // содержимое сетки не сохраняется между открытиями, поэтому достаточно одного
+    // общего состояния "открыто/закрыто".
+    bool workbenchOpen = false;
+
+    // === Печь ===
+    // В отличие от верстака, печь хранит своё состояние по координатам (как сундук) —
+    // предметы и таймеры готовки не пропадают, пока печь стоит в мире.
+    struct FurnaceState {
+        std::vector<InventorySlot> slots; // 0 = сырьё, 1 = топливо, 2 = результат
+        float burnTimeLeft = 0.f;         // сколько ещё "гореть" текущей порции топлива
+        float burnTimeMax  = 0.f;         // сколько горела эта порция изначально (для индикатора)
+        float cookProgress = 0.f;         // накопленное время готовки текущего сырья
+        FurnaceState() : slots(3, InventorySlot(BlockType::AIR, 0)) {}
+    };
+    std::map<std::pair<int, int>, FurnaceState> furnaceStorage;
+    bool furnaceOpen = false;
+    std::pair<int, int> openFurnacePos{-1, -1};
+    void updateFurnaces(float deltaTime);
 
     sf::Texture blockTexture; // атлас текстур блоков (textures/blocks.png)
 
@@ -62,7 +93,7 @@ private:
     std::vector<Arrow> arrows;
     float chickenRespawnTimer;            // через сколько секунд появится следующий цыплёнок (если их мало)
     static constexpr int MAX_CHICKENS = 6;
-    static constexpr int FOOD_PER_CHICKEN = 3;
+    static constexpr int FOOD_PER_CHICKEN = 1; // сколько сырого мяса выпадает с одной курицы
 
     // Заложенный и подожжённый TNT — ждёт взрыва
     struct ActiveTNT {

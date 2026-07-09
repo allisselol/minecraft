@@ -111,6 +111,7 @@ public:
             case BlockType::BRICK:
             case BlockType::SANDSTONE:
             case BlockType::OBSIDIAN:
+            case BlockType::FURNACE:
                 play("dig_stone" + std::to_string(r)); break;
             case BlockType::WOOD:
             case BlockType::LEAVES:
@@ -118,6 +119,8 @@ public:
             case BlockType::PLANKS:
             case BlockType::BOOKSHELF:
             case BlockType::PUMPKIN:
+            case BlockType::WORKBENCH:
+            case BlockType::CHEST:
                 play("dig_wood" + std::to_string(r)); break;
             default: break;
         }
