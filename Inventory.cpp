@@ -767,31 +767,59 @@ void Inventory::drawFurnaceScreen(sf::RenderWindow& window, std::vector<Inventor
 void Inventory::drawIcon(sf::RenderWindow& window, BlockType type, float sx, float sy, float size) {
     if (type == BlockType::AIR) return;
 
-    // Факел рисуем процедурно (в атласе его нет) — палочка и пламя
+    // Факел рисуем процедурно (в атласе его нет) — палочка и мягкое многослойное пламя
     if (type == BlockType::TORCH) {
         float cx = sx + size / 2.f;
         sf::RectangleShape stick({size * 0.14f, size * 0.55f});
         stick.setFillColor(sf::Color(120, 80, 40));
         stick.setPosition({cx - size * 0.07f, sy + size * 0.45f});
         window.draw(stick);
-        sf::CircleShape flame(size * 0.18f);
-        flame.setFillColor(sf::Color(255, 150, 40));
-        flame.setOrigin({size * 0.18f, size * 0.18f});
-        flame.setPosition({cx, sy + size * 0.4f});
-        window.draw(flame);
-        sf::CircleShape core(size * 0.09f);
-        core.setFillColor(sf::Color(255, 230, 140));
-        core.setOrigin({size * 0.09f, size * 0.09f});
-        core.setPosition({cx, sy + size * 0.4f});
+
+        float baseY = sy + size * 0.42f;
+
+        sf::CircleShape base(size * 0.19f);
+        base.setScale({0.85f, 1.15f});
+        base.setOrigin({size * 0.19f, size * 0.19f});
+        base.setPosition({cx, baseY});
+        base.setFillColor(sf::Color(224, 100, 28, 235));
+        window.draw(base);
+
+        sf::CircleShape mid(size * 0.135f);
+        mid.setScale({0.85f, 1.2f});
+        mid.setOrigin({size * 0.135f, size * 0.135f});
+        mid.setPosition({cx, baseY - size * 0.09f});
+        mid.setFillColor(sf::Color(255, 165, 40));
+        window.draw(mid);
+
+        sf::CircleShape core(size * 0.068f);
+        core.setOrigin({size * 0.068f, size * 0.068f});
+        core.setPosition({cx, baseY - size * 0.135f});
+        core.setFillColor(sf::Color(255, 235, 170));
         window.draw(core);
+
+        sf::CircleShape tip(size * 0.044f);
+        tip.setScale({0.8f, 1.3f});
+        tip.setOrigin({size * 0.044f, size * 0.044f});
+        tip.setPosition({cx, baseY - size * 0.235f});
+        tip.setFillColor(sf::Color(206, 46, 24, 235));
+        window.draw(tip);
         return;
     }
 
-    // Мясо (сырое/готовое) — рисуем процедурно, как факел: овальный кусок с прожилками
-    if (type == BlockType::RAW_CHICKEN || type == BlockType::COOKED_CHICKEN) {
-        bool cooked = (type == BlockType::COOKED_CHICKEN);
-        sf::Color base   = cooked ? sf::Color(170, 110, 55) : sf::Color(235, 175, 165);
-        sf::Color stripe = cooked ? sf::Color(120, 70, 30)  : sf::Color(215, 130, 120);
+    // Мясо (сырое/готовое, курица или говядина) — рисуем процедурно: овальный кусок с прожилками
+    if (type == BlockType::RAW_CHICKEN || type == BlockType::COOKED_CHICKEN ||
+        type == BlockType::RAW_BEEF    || type == BlockType::COOKED_BEEF) {
+        bool cooked = (type == BlockType::COOKED_CHICKEN || type == BlockType::COOKED_BEEF);
+        bool beef   = (type == BlockType::RAW_BEEF || type == BlockType::COOKED_BEEF);
+
+        sf::Color base, stripe;
+        if (beef) {
+            base   = cooked ? sf::Color(120, 65, 40)  : sf::Color(205, 70, 70);
+            stripe = cooked ? sf::Color(80, 40, 22)   : sf::Color(160, 40, 45);
+        } else {
+            base   = cooked ? sf::Color(170, 110, 55) : sf::Color(235, 175, 165);
+            stripe = cooked ? sf::Color(120, 70, 30)  : sf::Color(215, 130, 120);
+        }
 
         sf::CircleShape meat(size * 0.42f);
         meat.setFillColor(base);

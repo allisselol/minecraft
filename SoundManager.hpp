@@ -50,6 +50,19 @@ public:
         load("enemy_step",  "sounds/enemy_step.ogg");  // шаги лучника
         load("enemy_death", "sounds/enemy_death.ogg"); // смерть лучника
 
+        // Новые звуки — если файла ещё нет, просто останется тихо (см. load() выше)
+        load("chest_open",      "sounds/chest_open.ogg");
+        load("chest_close",     "sounds/chest_close.ogg");
+        load("enderchest_open", "sounds/enderchest_open.ogg");
+        load("enderchest_close","sounds/enderchest_close.ogg");
+        load("furnace_crackle", "sounds/furnace_crackle.ogg"); // потрескивание горящей печи
+        load("eat",              "sounds/eat.ogg");
+        load("click",            "sounds/click.ogg"); // подтверждение крафта
+        load("cow_hurt1", "sounds/cow_hurt1.ogg");
+        load("cow_hurt2", "sounds/cow_hurt2.ogg");
+        load("cow_say1",  "sounds/cow_say1.ogg");
+        load("cow_say2",  "sounds/cow_say2.ogg");
+
         // Фоновый дождь — стримится с диска и зацикливается (ogg надёжнее mp3 в SFML)
         if (rainMusic.openFromFile("sounds/rain.ogg")) {
             rainMusic.setLooping(true);
@@ -147,6 +160,17 @@ public:
     void playSplash() { play("splash"); }  // звук воды
     void playChickenDeath() { play("hurt1"); } // гибель курицы
     void playZombie()       { play("zombie"); } // рычание зомби
+
+    void playChestOpen()  { play("chest_open"); }
+    void playChestClose() { play("chest_close"); }
+    void playEnderChestOpen()  { play("enderchest_open"); }
+    void playEnderChestClose() { play("enderchest_close"); }
+    void playEat()   { play("eat"); }
+    void playClick() { play("click"); } // подтверждение крафта
+    void playCowHurt() { play("cow_hurt" + std::to_string(rand() % 2 + 1)); }
+    void playCowMoo()  { play("cow_say"  + std::to_string(rand() % 2 + 1)); }
+
+    void playFurnaceCrackle(float distBlocks) { playAt("furnace_crackle", distBlocks, 8.f); }
 
     // Проигрывает звук с громкостью, зависящей от расстояния (в блоках).
     // Дальше maxDist — не слышно; вблизи — полная громкость.

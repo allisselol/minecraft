@@ -10,6 +10,7 @@
 #include "HUD.hpp"
 #include "Particle.hpp"
 #include "Chicken.hpp"
+#include "Cow.hpp"
 #include "Enemy.hpp"
 
 class Game {
@@ -45,6 +46,7 @@ private:
         float burnTimeLeft = 0.f;         // сколько ещё "гореть" текущей порции топлива
         float burnTimeMax  = 0.f;         // сколько горела эта порция изначально (для индикатора)
         float cookProgress = 0.f;         // накопленное время готовки текущего сырья
+        float crackleTimer = 0.f;         // через сколько секунд снова "треснуть" (пока горит)
         FurnaceState() : slots(3, InventorySlot(BlockType::AIR, 0)) {}
     };
     std::map<std::pair<int, int>, FurnaceState> furnaceStorage;
@@ -83,6 +85,10 @@ private:
     void spawnChicken();                 // ищет случайное место на поверхности и добавляет цыплёнка
     void killChicken(size_t index);       // "добыча" цыплёнка: частицы + еда + удаление
 
+    std::vector<Cow> cows;
+    void spawnCow();                     // ищет случайное место на поверхности и добавляет корову
+    void killCow(size_t index);          // "добыча" коровы: частицы + сырая говядина + удаление
+
     std::vector<Enemy> enemies;
     void spawnEnemy();                   // спавнит врага на поверхности подальше от игрока
     void killEnemy(size_t index);        // смерть врага: частицы + удаление
@@ -94,6 +100,10 @@ private:
     float chickenRespawnTimer;            // через сколько секунд появится следующий цыплёнок (если их мало)
     static constexpr int MAX_CHICKENS = 6;
     static constexpr int FOOD_PER_CHICKEN = 1; // сколько сырого мяса выпадает с одной курицы
+
+    float cowRespawnTimer = 0.f;          // через сколько секунд появится следующая корова (если их мало)
+    static constexpr int MAX_COWS = 4;
+    static constexpr int BEEF_PER_COW = 1; // сколько сырой говядины выпадает с одной коровы
 
     // Заложенный и подожжённый TNT — ждёт взрыва
     struct ActiveTNT {

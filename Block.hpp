@@ -31,6 +31,8 @@ enum class BlockType {
     // Их нельзя поставить в мир, только держать в инвентаре.
     RAW_CHICKEN,
     COOKED_CHICKEN,
+    RAW_BEEF,
+    COOKED_BEEF,
     IRON_INGOT,
     GOLD_INGOT
 };
@@ -44,7 +46,8 @@ struct Block {
     // "Предметные" типы (еда, слитки) — не блоки, никогда не встречаются в мире
     bool isItem() const {
         return type == BlockType::RAW_CHICKEN || type == BlockType::COOKED_CHICKEN ||
-               type == BlockType::IRON_INGOT   || type == BlockType::GOLD_INGOT;
+               type == BlockType::RAW_BEEF    || type == BlockType::COOKED_BEEF    ||
+               type == BlockType::IRON_INGOT  || type == BlockType::GOLD_INGOT;
     }
 
     bool isSolid() const {
@@ -60,6 +63,8 @@ struct Block {
         switch (type) {
             case BlockType::RAW_CHICKEN:    return 2;
             case BlockType::COOKED_CHICKEN: return 5; // приготовленное мясо сытнее сырого
+            case BlockType::RAW_BEEF:       return 3;
+            case BlockType::COOKED_BEEF:    return 6; // говядина чуть сытнее курицы
             default:                        return 0;
         }
     }
@@ -97,6 +102,8 @@ struct Block {
             case BlockType::FURNACE:   return sf::Color(115, 115, 115);
             case BlockType::RAW_CHICKEN:    return sf::Color(235, 180, 170);
             case BlockType::COOKED_CHICKEN: return sf::Color(180, 120, 60);
+            case BlockType::RAW_BEEF:       return sf::Color(205, 70, 70);
+            case BlockType::COOKED_BEEF:    return sf::Color(120, 65, 40);
             case BlockType::IRON_INGOT:     return sf::Color(220, 220, 225);
             case BlockType::GOLD_INGOT:     return sf::Color(250, 210, 60);
             default:                return sf::Color::Transparent;
@@ -184,6 +191,7 @@ struct Block {
 inline bool getSmeltResult(BlockType input, BlockType& outResult, float& outCookTime) {
     switch (input) {
         case BlockType::RAW_CHICKEN: outResult = BlockType::COOKED_CHICKEN; outCookTime = 5.f; return true;
+        case BlockType::RAW_BEEF:    outResult = BlockType::COOKED_BEEF;    outCookTime = 5.f; return true;
         case BlockType::IRON_ORE:    outResult = BlockType::IRON_INGOT;     outCookTime = 6.f; return true;
         case BlockType::GOLD_ORE:    outResult = BlockType::GOLD_INGOT;     outCookTime = 6.f; return true;
         default: return false;

@@ -74,6 +74,11 @@ Game::Game()
     for (int i = 0; i < MAX_CHICKENS; i++)
         spawnChicken();
     chickenRespawnTimer = 15.f + rand() % 15;
+
+    // И несколько коров рядом с ними
+    for (int i = 0; i < MAX_COWS; i++)
+        spawnCow();
+    cowRespawnTimer = 20.f + rand() % 15;
 }
 
 void Game::spawnChicken() {
@@ -118,6 +123,50 @@ void Game::killChicken(size_t index) {
     inventory.addItem(BlockType::RAW_CHICKEN, FOOD_PER_CHICKEN); // сырое мясо — есть сырым или приготовить в печи
 
     chickens.erase(chickens.begin() + index);
+}
+
+void Game::spawnCow() {
+    int bx = 5 + rand() % (WORLD_WIDTH - 10);
+    int surfaceY = 0;
+    for (int by = 0; by < WORLD_HEIGHT; by++) {
+        if (world.getBlock(bx, by).isSolid()) {
+            surfaceY = by;
+            break;
+        }
+    }
+    float spawnPx = bx * (float)BLOCK_SIZE;
+    float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE; // корова выше курицы — она крупнее
+    cows.emplace_back(spawnPx, spawnPy);
+}
+
+void Game::killCow(size_t index) {
+    float cx = cows[index].getX() + cows[index].getWidth()  / 2.f;
+    float cy = cows[index].getY() + cows[index].getHeight() / 2.f;
+
+    // Клочки шерсти вместо перьев
+    static std::mt19937 rng(std::random_device{}());
+    std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f);
+    std::uniform_real_distribution<float> speedDist(50.f, 140.f);
+    std::uniform_real_distribution<float> lifeDist(0.35f, 0.6f);
+    sf::Color furColors[2] = { sf::Color(150, 100, 70), sf::Color(240, 235, 225) };
+
+    for (int i = 0; i < 8; i++) {
+        Particle p;
+        float angle = angleDist(rng);
+        float speed = speedDist(rng);
+        p.position    = {cx, cy};
+        p.velocity    = {std::cos(angle) * speed, std::sin(angle) * speed - 80.f};
+        p.color       = furColors[i % 2];
+        p.size        = 3.f + (float)(rand() % 3);
+        p.maxLifetime = lifeDist(rng);
+        p.lifetime    = p.maxLifetime;
+        particles.push_back(p);
+    }
+
+    sounds.playCowHurt(); // звук гибели коровы
+    inventory.addItem(BlockType::RAW_BEEF, BEEF_PER_COW); // сырая говядина — есть сырой или приготовить в печи
+
+    cows.erase(cows.begin() + index);
 }
 
 void Game::spawnEnemy() {
@@ -226,6 +275,7 @@ void Game::handleEvents() {
                 } else if (chestOpen) {
                     // E закрывает открытый сундук, как и крестик
                     chestOpen = false;
+                    sounds.playChestClose();
                 } else {
                     inventoryOpen = !inventoryOpen;
                 }
@@ -294,13 +344,14 @@ void Game::handleEvents() {
                         chestOpen = false; // сундук куда-то делся (не должно случаться) — просто закрываем
                     } else if (inventory.handleChestCloseClick(mpos)) {
                         chestOpen = false;
+                        sounds.playChestClose();
                     } else if (inventory.handleChestClick(mpos, it->second)) {
                         sounds.playDig(BlockType::WOOD); // звук перекладывания вещей
                     }
                 } else if (inventory.handleCloseClick(mpos)) {
                     inventoryOpen = false; // клик по крестику закрывает инвентарь
                 } else if (inventory.handleCraftClick(mpos)) {
-                    sounds.playDig(BlockType::STONE); // временный звук "крафта"
+                    sounds.playClick(); // подтверждение крафта
                 }
             }
         }
@@ -442,6 +493,23 @@ void Game::updateFurnaces(float deltaTime) {
             // Готовить нечего или некуда — прогресс сбрасывается (топливо не тратится впустую)
             f.cookProgress = 0.f;
         }
+
+        // Потрескивание — пока горит топливо, независимо от того, готовится что-то или нет
+        // (то же условие, что и у видимого огонька в render())
+        if (f.burnTimeLeft > 0.f) {
+            f.crackleTimer -= deltaTime;
+            if (f.crackleTimer <= 0.f) {
+                float fx = (kv.first.first + 0.5f) * BLOCK_SIZE;
+                float fy = (kv.first.second + 0.5f) * BLOCK_SIZE;
+                float pcx = player.getX() + player.getWidth() / 2.f;
+                float pcy = player.getY() + player.getHeight() / 2.f;
+                float dist = std::sqrt((fx - pcx) * (fx - pcx) + (fy - pcy) * (fy - pcy)) / BLOCK_SIZE;
+                sounds.playFurnaceCrackle(dist);
+                f.crackleTimer = 1.5f + (float)(rand() % 150) / 100.f; // следующее потрескивание через 1.5–3.0 сек
+            }
+        } else {
+            f.crackleTimer = 0.f;
+        }
     }
 }
 
@@ -543,6 +611,18 @@ void Game::explodeAt(int bx, int by) {
         }
     }
 
+    for (auto& cow : cows) {
+        float dxc = cow.getX() - cx;
+        float dyc = cow.getY() - cy;
+        float distC = std::sqrt(dxc * dxc + dyc * dyc) / BLOCK_SIZE;
+        if (distC < DAMAGE_RADIUS) {
+            float lenC = std::max(1.f, std::sqrt(dxc * dxc + dyc * dyc));
+            float tC = std::max(0.f, 1.f - distC / DAMAGE_RADIUS);
+            float forceC = 250.f + 400.f * tC;
+            cow.applyKnockback((dxc / lenC) * forceC, -220.f - 250.f * tC);
+        }
+    }
+
     // Урон и отдача врагам в радиусе взрыва
     for (auto& e : enemies) {
         float dxe = e.getX() - cx;
@@ -605,6 +685,21 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
                 return;
             }
         }
+
+        // И не по корове ли (тоже добыча)
+        for (size_t i = 0; i < cows.size(); i++) {
+            sf::FloatRect bounds(
+                {cows[i].getX(), cows[i].getY()},
+                {cows[i].getWidth(), cows[i].getHeight()});
+            if (bounds.contains(worldPos)) {
+                int cbx = (int)(cows[i].getX() / BLOCK_SIZE);
+                int cby = (int)(cows[i].getY() / BLOCK_SIZE);
+                if (isWithinReach(cbx, cby)) {
+                    killCow(i);
+                }
+                return;
+            }
+        }
     }
 
     int bx = (int)(worldPos.x / BLOCK_SIZE);
@@ -658,6 +753,7 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
                 chestStorage[key] = std::vector<InventorySlot>(CHEST_SLOT_COUNT, InventorySlot(BlockType::AIR, 0));
             chestOpen = true;
             openChestPos = key;
+            sounds.playChestOpen();
             return;
         }
         if (clicked.type == BlockType::FURNACE) {
@@ -676,7 +772,7 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
             if (selBlock.isFood()) {
                 hud.setFood(hud.getFood() + selBlock.getFoodValue());
                 inventory.consumeSelected();
-                sounds.playDig(BlockType::WOOD); // временный звук еды
+                sounds.playEat();
                 return;
             }
             if (selBlock.isItem()) {
@@ -723,6 +819,16 @@ void Game::update(float deltaTime) {
         chickenRespawnTimer = 15.f + rand() % 15;
     }
 
+    for (auto& cow : cows)
+        cow.update(deltaTime, world);
+
+    cowRespawnTimer -= deltaTime;
+    if (cowRespawnTimer <= 0.f) {
+        if ((int)cows.size() < MAX_COWS)
+            spawnCow();
+        cowRespawnTimer = 20.f + rand() % 15;
+    }
+
     // Враги: преследуют игрока, бьют вблизи
     if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
         float pcx = player.getX() + player.getWidth()  / 2.f;
@@ -752,6 +858,11 @@ void Game::update(float deltaTime) {
                 float sp = 420.f;
                 arrows.push_back({ex, ey, ddx/len*sp, ddy/len*sp, 3.f});
             }
+        }
+
+        // Коровы иногда мычат, когда игрок рядом
+        for (auto& cow : cows) {
+            if (cow.shouldMoo(pcx, pcy, deltaTime)) sounds.playCowMoo();
         }
 
         // Ползуны, готовые взорваться — устраиваем взрыв в их точке и убираем
@@ -1082,6 +1193,38 @@ void Game::render() {
 
     std::vector<sf::Vector2f> lightSources; // центры факелов в кадре — для свечения в темноте
 
+    // Мягкое многослойное пламя (как у настоящего факела): широкое оранжевое основание,
+    // жёлто-оранжевая середина, светлое ядро и маленький красноватый кончик наверху.
+    // baseY — точка, где пламя "сидит"; scale — общий множитель размера (у печи он меньше).
+    auto drawFlame = [&](float cx, float baseY, float scale, float flicker) {
+        sf::CircleShape base(6.5f * flicker * scale);
+        base.setScale({0.85f, 1.15f});
+        base.setOrigin({6.5f * flicker * scale, 6.5f * flicker * scale});
+        base.setPosition({cx, baseY});
+        base.setFillColor(sf::Color(224, 100, 28, 235));
+        window.draw(base);
+
+        sf::CircleShape mid(4.6f * flicker * scale);
+        mid.setScale({0.85f, 1.2f});
+        mid.setOrigin({4.6f * flicker * scale, 4.6f * flicker * scale});
+        mid.setPosition({cx, baseY - 3.f * scale});
+        mid.setFillColor(sf::Color(255, 165, 40));
+        window.draw(mid);
+
+        sf::CircleShape core(2.3f * flicker * scale);
+        core.setOrigin({2.3f * flicker * scale, 2.3f * flicker * scale});
+        core.setPosition({cx, baseY - 4.6f * scale});
+        core.setFillColor(sf::Color(255, 235, 170));
+        window.draw(core);
+
+        sf::CircleShape tip(1.5f * flicker * scale);
+        tip.setScale({0.8f, 1.3f});
+        tip.setOrigin({1.5f * flicker * scale, 1.5f * flicker * scale});
+        tip.setPosition({cx, baseY - 8.f * scale});
+        tip.setFillColor(sf::Color(206, 46, 24, 235));
+        window.draw(tip);
+    };
+
     for (int y = startY; y < endY; y++) {
         for (int x = startX; x < endX; x++) {
             const Block& block = world.getBlock(x, y);
@@ -1103,20 +1246,9 @@ void Game::render() {
                 stick.setPosition({cx - stickW / 2.f, py + BLOCK_SIZE - stickH});
                 window.draw(stick);
 
-                float flicker = 0.8f + 0.2f * std::sin(animTime * 14.f + (x * 13 + y * 7));
+                float flicker = 0.92f + 0.08f * std::sin(animTime * 10.f + (x * 13 + y * 7));
                 float flameY = py + BLOCK_SIZE - stickH - 2.f;
-
-                sf::CircleShape flameOuter(6.f * flicker);
-                flameOuter.setOrigin({6.f * flicker, 6.f * flicker});
-                flameOuter.setPosition({cx, flameY});
-                flameOuter.setFillColor(sf::Color(255, 150, 40));
-                window.draw(flameOuter);
-
-                sf::CircleShape flameCore(3.f * flicker);
-                flameCore.setOrigin({3.f * flicker, 3.f * flicker});
-                flameCore.setPosition({cx, flameY});
-                flameCore.setFillColor(sf::Color(255, 230, 140));
-                window.draw(flameCore);
+                drawFlame(cx, flameY, 1.f, flicker);
 
                 lightSources.push_back({cx, py + BLOCK_SIZE / 2.f});
                 continue;
@@ -1150,20 +1282,9 @@ void Game::render() {
                 bool lit = (fit != furnaceStorage.end() && fit->second.burnTimeLeft > 0.f);
                 if (lit) {
                     float cx = px + BLOCK_SIZE / 2.f;
-                    float flicker = 0.8f + 0.2f * std::sin(animTime * 14.f + (x * 13 + y * 7));
-                    float mouthY = py + BLOCK_SIZE * 0.6f; // примерно где тёмное отверстие на текстуре печи
-
-                    sf::CircleShape glow(5.f * flicker);
-                    glow.setOrigin({5.f * flicker, 5.f * flicker});
-                    glow.setPosition({cx, mouthY});
-                    glow.setFillColor(sf::Color(255, 140, 40, 220));
-                    window.draw(glow);
-
-                    sf::CircleShape core(2.5f * flicker);
-                    core.setOrigin({2.5f * flicker, 2.5f * flicker});
-                    core.setPosition({cx, mouthY});
-                    core.setFillColor(sf::Color(255, 220, 140, 230));
-                    window.draw(core);
+                    float flicker = 0.92f + 0.08f * std::sin(animTime * 10.f + (x * 13 + y * 7));
+                    float mouthY = py + BLOCK_SIZE * 0.66f; // примерно где тёмное отверстие на текстуре печи
+                    drawFlame(cx, mouthY, 0.55f, flicker);
 
                     lightSources.push_back({cx, py + BLOCK_SIZE / 2.f});
                 }
@@ -1193,6 +1314,9 @@ void Game::render() {
 
     for (const auto& chicken : chickens)
         chicken.draw(window);
+
+    for (const auto& cow : cows)
+        cow.draw(window);
 
     for (const auto& e : enemies)
         e.draw(window);
@@ -1242,20 +1366,20 @@ void Game::render() {
             float k = darkAlpha / 165.f; // сила свечения растёт вместе с темнотой
 
             for (const auto& src : lightSources) {
-                sf::CircleShape glowOuter(150.f);
-                glowOuter.setOrigin({150.f, 150.f});
+                sf::CircleShape glowOuter(70.f);
+                glowOuter.setOrigin({70.f, 70.f});
                 glowOuter.setPosition(src);
                 glowOuter.setFillColor(sf::Color(255, 170, 80, (std::uint8_t)(40 * k)));
                 window.draw(glowOuter, addStates);
 
-                sf::CircleShape glowMid(90.f);
-                glowMid.setOrigin({90.f, 90.f});
+                sf::CircleShape glowMid(42.f);
+                glowMid.setOrigin({42.f, 42.f});
                 glowMid.setPosition(src);
                 glowMid.setFillColor(sf::Color(255, 190, 110, (std::uint8_t)(75 * k)));
                 window.draw(glowMid, addStates);
 
-                sf::CircleShape glowInner(45.f);
-                glowInner.setOrigin({45.f, 45.f});
+                sf::CircleShape glowInner(20.f);
+                glowInner.setOrigin({20.f, 20.f});
                 glowInner.setPosition(src);
                 glowInner.setFillColor(sf::Color(255, 215, 150, (std::uint8_t)(115 * k)));
                 window.draw(glowInner, addStates);
