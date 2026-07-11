@@ -55,6 +55,8 @@ private:
     void updateFurnaces(float deltaTime);
 
     sf::Texture blockTexture; // атлас текстур блоков (textures/blocks.png)
+    sf::Texture glowTexture;  // процедурный мягкий радиальный градиент — для солнца/луны/факелов/печи,
+                              // без колец: одна текстура с плавным затуханием альфы к краям
 
     std::vector<Particle> particles;
     void spawnBreakParticles(int bx, int by, const Block& block);
@@ -82,6 +84,10 @@ private:
     void drawRain();
 
     std::vector<Chicken> chickens;
+    // Ищет первый настоящий блок земли в столбце bx сверху вниз — пропускает листву и стволы
+    // деревьев, чтобы мобы не заспавнились на кроне дерева, а только на реальной земле.
+    int findGroundSurface(int bx) const;
+
     void spawnChicken();                 // ищет случайное место на поверхности и добавляет цыплёнка
     void killChicken(size_t index);       // "добыча" цыплёнка: частицы + еда + удаление
 
@@ -104,6 +110,9 @@ private:
     float cowRespawnTimer = 0.f;          // через сколько секунд появится следующая корова (если их мало)
     static constexpr int MAX_COWS = 4;
     static constexpr int BEEF_PER_COW = 1; // сколько сырой говядины выпадает с одной коровы
+
+    float petalTimer = 0.f; // таймер падающих лепестков сакуры (только в биоме сакуры рядом с игроком)
+    float snowTimer = 0.f;  // таймер падающего снега (только в снежном биоме рядом с игроком)
 
     // Заложенный и подожжённый TNT — ждёт взрыва
     struct ActiveTNT {

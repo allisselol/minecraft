@@ -53,6 +53,9 @@ private:
     void drawNumber(sf::RenderWindow& window, int number, float rx, float ry, float digitH); // пиксельные цифры
     void drawRecipeRow(sf::RenderWindow& window, const Recipe& recipe, float rx, float ry, bool craftable);
     void drawCraftingSection(sf::RenderWindow& window, float x, float y);
+    // Сколько колонок/строк займёт список простых рецептов — используется и при отрисовке
+    // окна инвентаря (чтобы посчитать нужный размер), и самим drawCraftingSection.
+    void computeCraftLayout(int& cols, int& rowsPerCol) const;
 
     bool canCraft(const Recipe& r) const;
     void craftRecipe(const Recipe& r);

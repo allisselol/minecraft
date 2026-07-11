@@ -2,7 +2,7 @@
 #include <vector>
 #include "Block.hpp"
 
-constexpr int WORLD_WIDTH  = 100;
+constexpr int WORLD_WIDTH  = 400; // мир заметно шире — чтобы по пути попадалось несколько разных биомов
 constexpr int WORLD_HEIGHT = 100;
 constexpr int BLOCK_SIZE   = 32;
 
@@ -54,4 +54,8 @@ public:
     int getWidth()  const { return WORLD_WIDTH; }
     int getHeight() const { return WORLD_HEIGHT; }
     unsigned int getSeed() const { return seed; }
+
+    // Какой "лесной" биом в этом x: 0 — обычный дуб, 1 — акация (саванна), 2 — сакура.
+    // Публичный — нужен и генерации мира, и отрисовке (чтобы тонировать траву под биом).
+    int biomeAt(int x) const;
 };

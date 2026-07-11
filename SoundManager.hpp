@@ -43,6 +43,9 @@ public:
         load("step_stone2", "sounds/step_stone2.ogg");
         load("step_wood1",  "sounds/step_wood1.ogg");
         load("step_wood2",  "sounds/step_wood2.ogg");
+        load("step_snow1",  "sounds/step_snow1.wav");
+        load("step_snow2",  "sounds/step_snow2.wav");
+        load("step_snow3",  "sounds/step_snow3.wav");
         load("fuse",   "sounds/fuse.wav");        // шипение факела/фитиля
         load("splash", "sounds/splash_weak.wav"); // плеск воды
         load("hurt1",  "sounds/hurt1.ogg");        // звук гибели курицы
@@ -58,6 +61,10 @@ public:
         load("furnace_crackle", "sounds/furnace_crackle.ogg"); // потрескивание горящей печи
         load("eat",              "sounds/eat.ogg");
         load("click",            "sounds/click.ogg"); // подтверждение крафта
+        load("door_open",  "sounds/door_open.ogg");
+        load("door_close", "sounds/door_close.ogg");
+        load("ladder_step1", "sounds/ladder_step1.ogg");
+        load("ladder_step2", "sounds/ladder_step2.ogg");
         load("cow_hurt1", "sounds/cow_hurt1.ogg");
         load("cow_hurt2", "sounds/cow_hurt2.ogg");
         load("cow_say1",  "sounds/cow_say1.ogg");
@@ -128,12 +135,20 @@ public:
                 play("dig_stone" + std::to_string(r)); break;
             case BlockType::WOOD:
             case BlockType::LEAVES:
+            case BlockType::LEAVES_ACACIA:
+            case BlockType::LEAVES_SNOWY:
+            case BlockType::LEAVES_SAKURA:
             case BlockType::TORCH:
             case BlockType::PLANKS:
             case BlockType::BOOKSHELF:
             case BlockType::PUMPKIN:
             case BlockType::WORKBENCH:
             case BlockType::CHEST:
+            case BlockType::LADDER:
+            case BlockType::DOOR:
+            case BlockType::DOOR_OPEN:
+            case BlockType::DOOR_TOP:
+            case BlockType::DOOR_TOP_OPEN:
                 play("dig_wood" + std::to_string(r)); break;
             default: break;
         }
@@ -155,6 +170,7 @@ public:
                 play("step_grass" + std::to_string(r)); break;
         }
     }
+    void playSnowStep() { play("step_snow" + std::to_string(rand() % 3 + 1)); } // шаги по снегу в снежном биоме
 
     void playFuse()   { play("fuse"); }    // звук факела / поджига TNT
     void playSplash() { play("splash"); }  // звук воды
@@ -169,6 +185,9 @@ public:
     void playClick() { play("click"); } // подтверждение крафта
     void playCowHurt() { play("cow_hurt" + std::to_string(rand() % 2 + 1)); }
     void playCowMoo()  { play("cow_say"  + std::to_string(rand() % 2 + 1)); }
+    void playDoorOpen()  { play("door_open"); }
+    void playDoorClose() { play("door_close"); }
+    void playLadderStep() { play("ladder_step" + std::to_string(rand() % 2 + 1)); }
 
     void playFurnaceCrackle(float distBlocks) { playAt("furnace_crackle", distBlocks, 8.f); }
 

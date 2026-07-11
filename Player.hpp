@@ -9,7 +9,8 @@ private:
     float width, height;
     bool  onGround;
     bool  moveLeft, moveRight;
-    bool  wantUp = false; // зажата ли клавиша вверх (для плавания в воде)
+    bool  wantUp = false; // зажата ли клавиша вверх (для плавания в воде и лазанья по лестнице)
+    bool  wantDown = false; // зажата ли клавиша вниз (спуск по лестнице)
     bool  wasInWater = false;     // был ли в воде в прошлом кадре
     bool  justEnteredWater = false; // вошёл в воду именно в этом кадре (для звука плеска)
     float walkTimer; // время в текущем цикле ходьбы, для анимации ног
@@ -17,6 +18,7 @@ private:
     static constexpr float GRAVITY    = 1200.f;
     static constexpr float JUMP_FORCE = -550.f;
     static constexpr float MOVE_SPEED = 200.f;
+    static constexpr float CLIMB_SPEED = 110.f; // скорость подъёма/спуска по лестнице
 
     // Высота, с которой падение ещё безопасно (чуть больше высоты обычного прыжка),
     // и урон за каждый лишний блок падения сверх неё
@@ -32,6 +34,9 @@ private:
 
     void resolveCollisions(const World& world);
     bool isInWater(const World& world) const; // находится ли игрок (его центр) в воде
+    bool checkLadder(const World& world) const; // проверка на месте: касается ли игрок лестницы
+
+    bool onLadderState = false; // закэшированный результат checkLadder() за этот кадр
 
 public:
     Player(float startX, float startY);
@@ -58,5 +63,7 @@ public:
     float getHeight() const { return height; }
     bool  isOnGround() const { return onGround; }
     bool  isMoving()   const { return moveLeft || moveRight; }
+    bool  isClimbing() const { return onLadderState; } // на лестнице ли сейчас (для звука шагов)
+    bool  isClimbingMoving() const { return onLadderState && (wantUp || wantDown); } // реально лезет, не просто стоит
     bool  didJustEnterWater() const { return justEnteredWater; }
 };

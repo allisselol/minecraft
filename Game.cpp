@@ -24,16 +24,10 @@ Game::Game()
     cursor.setOutlineThickness(2.f);
 
     // Ставим игрока на реальную поверхность в колонке спавна (а не на фиксированную высоту,
-    // иначе можно оказаться внутри камня/пещеры). Ищем верхний твёрдый блок земли,
-    // пропуская листву и стволы деревьев (иначе встанем на крону).
+    // иначе можно оказаться внутри камня/пещеры или на кроне дерева).
     {
         int scx = WORLD_WIDTH / 2;
-        int surfaceRow = 0;
-        for (int by = 0; by < WORLD_HEIGHT; by++) {
-            const Block& b = world.getBlock(scx, by);
-            if (b.type == BlockType::LEAVES || b.type == BlockType::WOOD) continue;
-            if (b.isSolid()) { surfaceRow = by; break; }
-        }
+        int surfaceRow = findGroundSurface(scx);
         spawnX = scx * (float)BLOCK_SIZE;
         spawnY = (surfaceRow - 3) * (float)BLOCK_SIZE; // на 3 блока выше поверхности (высота игрока + запас)
         player.respawn(spawnX, spawnY);
@@ -70,6 +64,30 @@ Game::Game()
     blockTexture.setSmooth(false); // чёткие пиксели без размытия
     inventory.setBlockTexture(&blockTexture); // иконки инвентаря рисуются реальной текстурой
 
+    // Генерируем мягкий радиальный градиент один раз при старте: белый круг с плавно
+    // (по smoothstep) затухающей к краю альфой — без единой видимой границы/кольца.
+    // Дальше это просто растягивается спрайтом под нужный радиус (солнце крупнее, факел мельче)
+    // и тонируется нужным цветом через setColor — так свечение выглядит цельным, а не кольцами.
+    {
+        const unsigned int GLOW_TEX_SIZE = 256;
+        sf::Image glowImg;
+        glowImg.resize({GLOW_TEX_SIZE, GLOW_TEX_SIZE}, sf::Color::Transparent);
+        float center = GLOW_TEX_SIZE / 2.f;
+        for (unsigned int gy = 0; gy < GLOW_TEX_SIZE; gy++) {
+            for (unsigned int gx = 0; gx < GLOW_TEX_SIZE; gx++) {
+                float dx = (float)gx - center, dy = (float)gy - center;
+                float dist = std::sqrt(dx * dx + dy * dy) / center; // 0 в центре, 1 на краю
+                float t = std::clamp(1.f - dist, 0.f, 1.f);
+                float alpha = t * t * (3.f - 2.f * t); // smoothstep — плавно и без ступенек
+                glowImg.setPixel({gx, gy}, sf::Color(255, 255, 255, (std::uint8_t)(alpha * 255.f)));
+            }
+        }
+        if (!glowTexture.loadFromImage(glowImg)) {
+            std::cerr << "Failed to generate glow texture" << std::endl;
+        }
+        glowTexture.setSmooth(true); // билинейная интерполяция при растяжении — никаких резких краёв
+    }
+
     // Спавним несколько цыплят на поверхности в случайных местах мира
     for (int i = 0; i < MAX_CHICKENS; i++)
         spawnChicken();
@@ -81,15 +99,20 @@ Game::Game()
     cowRespawnTimer = 20.f + rand() % 15;
 }
 
+int Game::findGroundSurface(int bx) const {
+    for (int by = 0; by < WORLD_HEIGHT; by++) {
+        Block b = world.getBlock(bx, by);
+        if (!b.isSolid()) continue;
+        // Листва и ствол — это дерево, а не земля; спавнить моба на кроне не годится
+        if (b.isLeaf() || b.type == BlockType::WOOD) continue;
+        return by;
+    }
+    return 0;
+}
+
 void Game::spawnChicken() {
     int bx = 5 + rand() % (WORLD_WIDTH - 10);
-    int surfaceY = 0;
-    for (int by = 0; by < WORLD_HEIGHT; by++) {
-        if (world.getBlock(bx, by).isSolid()) {
-            surfaceY = by;
-            break;
-        }
-    }
+    int surfaceY = findGroundSurface(bx);
     float spawnPx = bx * (float)BLOCK_SIZE + 4.f;
     float spawnPy = (surfaceY - 1) * (float)BLOCK_SIZE;
     chickens.emplace_back(spawnPx, spawnPy);
@@ -127,13 +150,7 @@ void Game::killChicken(size_t index) {
 
 void Game::spawnCow() {
     int bx = 5 + rand() % (WORLD_WIDTH - 10);
-    int surfaceY = 0;
-    for (int by = 0; by < WORLD_HEIGHT; by++) {
-        if (world.getBlock(bx, by).isSolid()) {
-            surfaceY = by;
-            break;
-        }
-    }
+    int surfaceY = findGroundSurface(bx);
     float spawnPx = bx * (float)BLOCK_SIZE;
     float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE; // корова выше курицы — она крупнее
     cows.emplace_back(spawnPx, spawnPy);
@@ -179,10 +196,7 @@ void Game::spawnEnemy() {
         tries++;
     } while (std::abs(bx - px) < 10 && tries < 20);
 
-    int surfaceY = 0;
-    for (int by = 0; by < WORLD_HEIGHT; by++) {
-        if (world.getBlock(bx, by).isSolid()) { surfaceY = by; break; }
-    }
+    int surfaceY = findGroundSurface(bx);
     float spawnPx = bx * (float)BLOCK_SIZE + 3.f;
     float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE;
 
@@ -244,10 +258,20 @@ void Game::run() {
             if (stepClock.getElapsedTime().asSeconds() > 0.4f) {
                 int bx = (int)((player.getX() + player.getWidth() / 2.f) / BLOCK_SIZE);
                 int by = (int)((player.getY() + player.getHeight() + 2) / BLOCK_SIZE);
-                BlockType underType = BlockType::GRASS;
-                if (world.inBounds(bx, by) && world.getBlock(bx, by).isSolid())
-                    underType = world.getBlock(bx, by).type;
-                sounds.playStep(underType);
+                if (world.inBounds(bx, 0) && world.biomeAt(bx) == 3) {
+                    sounds.playSnowStep(); // снежный биом — свой звук шагов, независимо от блока под ногами
+                } else {
+                    BlockType underType = BlockType::GRASS;
+                    if (world.inBounds(bx, by) && world.getBlock(bx, by).isSolid())
+                        underType = world.getBlock(bx, by).type;
+                    sounds.playStep(underType);
+                }
+                stepClock.restart();
+            }
+        } else if (player.isClimbingMoving()) {
+            // Лазанье по лестнице — свой периодический звук, вместо обычных шагов
+            if (stepClock.getElapsedTime().asSeconds() > 0.35f) {
+                sounds.playLadderStep();
                 stepClock.restart();
             }
         } else if (!player.isMoving()) {
@@ -294,6 +318,7 @@ void Game::handleEvents() {
                 if (kp->code == sf::Keyboard::Key::A ||
                     kp->code == sf::Keyboard::Key::D ||
                     kp->code == sf::Keyboard::Key::W ||
+                    kp->code == sf::Keyboard::Key::S ||
                     kp->code == sf::Keyboard::Key::Space)
                     player.handleKeyPressed(kp->code);
             }
@@ -397,7 +422,7 @@ void Game::spawnBreakParticles(int bx, int by, const Block& block) {
 void Game::updateParticles(float deltaTime) {
     const float GRAVITY = 700.f;
     for (auto& p : particles) {
-        p.velocity.y += GRAVITY * deltaTime;
+        p.velocity.y += GRAVITY * p.gravityScale * deltaTime;
         p.position   += p.velocity * deltaTime;
         p.lifetime   -= deltaTime;
     }
@@ -709,10 +734,21 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
 
     if (button == sf::Mouse::Button::Left) {
         Block block = world.getBlock(bx, by);
-        bool breakable = block.isSolid() || block.type == BlockType::TORCH;
+        bool breakable = block.isSolid() || block.type == BlockType::TORCH ||
+                          block.isLadder() || block.isDoorPart();
         if (breakable) {
             if (block.type == BlockType::TNT) {
                 armTnt(bx, by, 1.6f); // поджигаем, а не ломаем сразу
+            } else if (block.isDoorPart()) {
+                // Дверь целиком в 2 клетки — ломаем обе половинки, а не только ту, по которой кликнули
+                sounds.playDig(BlockType::WOOD);
+                spawnBreakParticles(bx, by, block);
+                bool isTop = block.isDoorTop();
+                int bottomY = isTop ? by + 1 : by;
+                int topY    = isTop ? by     : by - 1;
+                world.setBlock(bx, bottomY, BlockType::AIR);
+                world.setBlock(bx, topY,    BlockType::AIR);
+                inventory.addItem(BlockType::DOOR, 1); // только 1 дверь за обе половинки
             } else {
                 sounds.playDig(block.type);
                 spawnBreakParticles(bx, by, block);
@@ -763,6 +799,19 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
             openFurnacePos = key;
             return;
         }
+        if (clicked.type == BlockType::DOOR      || clicked.type == BlockType::DOOR_OPEN ||
+            clicked.type == BlockType::DOOR_TOP  || clicked.type == BlockType::DOOR_TOP_OPEN) {
+            // Дверь занимает 2 клетки по высоте — определяем, где у неё низ, а где верх,
+            // и переключаем обе половинки разом (клик по любой из них сработает одинаково).
+            bool isTop = clicked.isDoorTop();
+            int bottomY = isTop ? by + 1 : by;
+            int topY    = isTop ? by     : by - 1;
+            bool opening = !clicked.isDoorOpenState();
+            world.setBlock(bx, bottomY, opening ? BlockType::DOOR_OPEN     : BlockType::DOOR);
+            world.setBlock(bx, topY,    opening ? BlockType::DOOR_TOP_OPEN : BlockType::DOOR_TOP);
+            if (opening) sounds.playDoorOpen(); else sounds.playDoorClose();
+            return;
+        }
 
         // Открытие контейнеров — в приоритете. Если клик пришёлся не по ним, но в руке
         // еда — едим её вместо попытки "поставить" как блок (есть можно, глядя куда угодно).
@@ -783,6 +832,19 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
 
         if (!world.getBlock(bx, by).isSolid() && inventory.hasSelected()) {
             BlockType t = inventory.getSelectedType();
+
+            if (t == BlockType::DOOR) {
+                // Дверь ростом в 2 клетки: низ — там, куда кликнули, верх — клетка над ней.
+                // Ставим, только если обе клетки свободны (не заняты чем-то твёрдым).
+                if (by - 1 >= 0 && !world.getBlock(bx, by - 1).isSolid()) {
+                    world.setBlock(bx, by, BlockType::DOOR);
+                    world.setBlock(bx, by - 1, BlockType::DOOR_TOP);
+                    sounds.playDig(BlockType::WOOD);
+                    inventory.consumeSelected();
+                }
+                return;
+            }
+
             if (t == BlockType::TORCH)      sounds.playFuse();   // потрескивание факела
             else if (t == BlockType::WATER) sounds.playSplash(); // плеск при установке воды
             else                            sounds.playDig(t);
@@ -803,6 +865,52 @@ void Game::update(float deltaTime) {
     updateExplosives(deltaTime);
     updateFurnaces(deltaTime);
     animTime += deltaTime;
+
+    // Лепестки сакуры — медленно парят вниз, пока игрок стоит в биоме сакуры.
+    // Это однозначный, "настоящий" признак биома, а не просто оттенок травы,
+    // который легко принять за случайность/баг.
+    {
+        int playerBx = (int)((player.getX() + player.getWidth() / 2.f) / BLOCK_SIZE);
+        if (world.inBounds(playerBx, 0) && world.biomeAt(playerBx) == 2) {
+            petalTimer -= deltaTime;
+            if (petalTimer <= 0.f) {
+                petalTimer = 0.15f + (float)(rand() % 15) / 100.f; // новый лепесток каждые ~0.15-0.3 сек
+                float spawnX = player.getX() + (float)(rand() % 500) - 250.f; // в районе экрана над игроком
+                float spawnY = player.getY() - 250.f - (float)(rand() % 100);
+                Particle petal;
+                petal.position = {spawnX, spawnY};
+                petal.velocity = {(float)(rand() % 40) - 20.f, 25.f + (float)(rand() % 20)};
+                petal.color = sf::Color(255, 170, 205, 230);
+                petal.size = 3.f + (float)(rand() % 3);
+                petal.maxLifetime = 4.f + (float)(rand() % 200) / 100.f;
+                petal.lifetime = petal.maxLifetime;
+                petal.gravityScale = 0.03f; // почти невесомый, парит, а не падает камнем
+                particles.push_back(petal);
+            }
+        }
+    }
+
+    // Снег — идёт постоянно, пока игрок в снежном биоме (а не по случайной погоде)
+    {
+        int playerBx = (int)((player.getX() + player.getWidth() / 2.f) / BLOCK_SIZE);
+        if (world.inBounds(playerBx, 0) && world.biomeAt(playerBx) == 3) {
+            snowTimer -= deltaTime;
+            if (snowTimer <= 0.f) {
+                snowTimer = 0.03f + (float)(rand() % 5) / 100.f; // снежинки чаще лепестков — гуще снегопад
+                float spawnX = player.getX() + (float)(rand() % 700) - 350.f;
+                float spawnY = player.getY() - 300.f - (float)(rand() % 100);
+                Particle flake;
+                flake.position = {spawnX, spawnY};
+                flake.velocity = {(float)(rand() % 30) - 15.f, 45.f + (float)(rand() % 25)};
+                flake.color = sf::Color(255, 255, 255, 220);
+                flake.size = 2.f + (float)(rand() % 3);
+                flake.maxLifetime = 3.f + (float)(rand() % 150) / 100.f;
+                flake.lifetime = flake.maxLifetime;
+                flake.gravityScale = 0.05f; // тоже почти невесомый — снег кружит, а не сыплется камнем
+                particles.push_back(flake);
+            }
+        }
+    }
 
     dayTime += deltaTime;
     if (dayTime >= DAY_LENGTH) dayTime -= DAY_LENGTH;
@@ -1123,34 +1231,52 @@ void Game::drawSky() {
     gradient[3].position = {800.f, 600.f}; gradient[3].color = bottomColor;
     window.draw(gradient);
 
-    // Солнце и луна двигаются по дуге в противофазе друг другу
+    // Солнце и луна двигаются по окружности с постоянной угловой скоростью.
+    // Важно: радиус по X и по Y должен быть ОДИНАКОВЫМ — иначе (даже со сдвигом фаз)
+    // скорость на дуге всё равно будет неравномерной, "зависая" то на восходе/закате,
+    // то в зените. Заодно радиус поменьше держит светила ближе к центру, а не у самых краёв.
     float angle      = (dayTime / DAY_LENGTH) * 2.f * 3.14159265f;
-    float sunX       = 400.f - std::cos(angle) * 340.f;
-    float sunY       = 480.f - brightness * 380.f;
-    float moonBright = 1.f - brightness;
+    float R          = 190.f;
+    float sunX       = 400.f - std::sin(angle) * R;
+    float sunY       = 290.f + std::cos(angle) * R;
     float moonAngle  = angle + 3.14159265f;
-    float moonX      = 400.f - std::cos(moonAngle) * 340.f;
-    float moonY      = 480.f - moonBright * 380.f;
+    float moonX      = 400.f - std::sin(moonAngle) * R;
+    float moonY      = 290.f + std::cos(moonAngle) * R;
+    float moonBright = 1.f - brightness;
 
     sf::RenderStates addStates;
     addStates.blendMode = sf::BlendAdd;
 
     auto drawGlowDisc = [&](float cx, float cy, float strength, sf::Color core, sf::Color glow) {
         if (strength <= 0.02f) return;
-        float radii[3] = {70.f, 45.f, 25.f};
-        for (float r : radii) {
-            sf::CircleShape g(r);
-            g.setOrigin({r, r});
-            g.setPosition({cx, cy});
-            std::uint8_t a = (std::uint8_t)(38.f * strength * (25.f / r));
-            g.setFillColor(sf::Color(glow.r, glow.g, glow.b, a));
-            window.draw(g, addStates);
-        }
-        sf::CircleShape disc(16.f);
-        disc.setOrigin({16.f, 16.f});
+        float radius = 100.f; // насколько далеко расходится свечение солнца/луны
+        sf::Sprite glowSprite(glowTexture);
+        glowSprite.setOrigin({128.f, 128.f});
+        float scale = radius / 128.f;
+        glowSprite.setScale({scale, scale});
+        glowSprite.setPosition({cx, cy});
+        glowSprite.setColor(sf::Color(glow.r, glow.g, glow.b, (std::uint8_t)(190.f * strength)));
+        window.draw(glowSprite, addStates);
+
+        // Квадратное, чуть "пиксельное" солнце/луна — как в оригинале, не гладкий круг
+        float discSize = 30.f;
+        sf::RectangleShape disc({discSize, discSize});
+        disc.setOrigin({discSize / 2.f, discSize / 2.f});
         disc.setPosition({cx, cy});
         disc.setFillColor(core);
         window.draw(disc);
+
+        // Небольшая внутренняя рамка чуть темнее — намёк на пиксельную текстуру, а не заливку
+        sf::Color shade(
+            (std::uint8_t)(core.r * 0.85f),
+            (std::uint8_t)(core.g * 0.85f),
+            (std::uint8_t)(core.b * 0.85f));
+        float innerSize = discSize - 8.f;
+        sf::RectangleShape inner({innerSize, innerSize});
+        inner.setOrigin({innerSize / 2.f, innerSize / 2.f});
+        inner.setPosition({cx, cy});
+        inner.setFillColor(shade);
+        window.draw(inner);
     };
 
     drawGlowDisc(sunX, sunY, brightness, sf::Color(255, 250, 210), sf::Color(255, 225, 120));
@@ -1228,9 +1354,11 @@ void Game::render() {
     for (int y = startY; y < endY; y++) {
         for (int x = startX; x < endX; x++) {
             const Block& block = world.getBlock(x, y);
-            bool isTorch = (block.type == BlockType::TORCH);
+            bool isTorch    = (block.type == BlockType::TORCH);
+            bool isLadder   = (block.type == BlockType::LADDER);
+            bool isDoor     = block.isDoorPart();
             if (block.isWater()) continue; // вода рисуется отдельным полупрозрачным проходом
-            if (!block.isSolid() && !isTorch) continue;
+            if (!block.isSolid() && !isTorch && !isLadder && !isDoor) continue;
 
             float px = (float)(x * BLOCK_SIZE);
             float py = (float)(y * BLOCK_SIZE);
@@ -1254,9 +1382,83 @@ void Game::render() {
                 continue;
             }
 
+            if (isLadder) {
+                // Лестница — процедурно: два рельса по бокам клетки и перекладины между ними
+                sf::Color rail(140, 100, 55);
+                sf::Color rung(170, 125, 70);
+                float railW = BLOCK_SIZE * 0.12f;
+                sf::RectangleShape left({railW, (float)BLOCK_SIZE});
+                left.setPosition({px + BLOCK_SIZE * 0.1f, py});
+                left.setFillColor(rail);
+                window.draw(left);
+                sf::RectangleShape right({railW, (float)BLOCK_SIZE});
+                right.setPosition({px + BLOCK_SIZE * 0.78f, py});
+                right.setFillColor(rail);
+                window.draw(right);
+                for (int i = 0; i < 3; i++) {
+                    sf::RectangleShape r({BLOCK_SIZE * 0.58f, BLOCK_SIZE * 0.12f});
+                    r.setPosition({px + BLOCK_SIZE * 0.21f, py + BLOCK_SIZE * (0.18f + i * 0.32f)});
+                    r.setFillColor(rung);
+                    window.draw(r);
+                }
+                continue;
+            }
+
+            if (isDoor) {
+                // Дверь — процедурно, ростом в 2 клетки: закрытая перекрывает проём целиком,
+                // открытая "распахнута" к одному краю (тонкая полоска сбоку) и не мешает проходу.
+                // Верх и низ рисуются без зазора между собой — только с внешним отступом сверху/снизу.
+                bool open  = block.isDoorOpenState();
+                bool isTop = block.isDoorTop();
+                sf::Color panel(150, 108, 60);
+                sf::Color frame(105, 74, 40);
+                sf::Color handle(230, 200, 90);
+
+                float doorW = open ? BLOCK_SIZE * 0.16f : BLOCK_SIZE * 0.7f;
+                float doorX = open ? px + BLOCK_SIZE - doorW : px + BLOCK_SIZE * 0.15f;
+                float padTop    = isTop  ? 1.f : 0.f;
+                float padBottom = isTop  ? 0.f : 1.f;
+
+                sf::RectangleShape panelShape({doorW, (float)BLOCK_SIZE - padTop - padBottom});
+                panelShape.setPosition({doorX, py + padTop});
+                panelShape.setFillColor(panel);
+                panelShape.setOutlineColor(frame);
+                panelShape.setOutlineThickness(2.f);
+                window.draw(panelShape);
+
+                if (!isTop) {
+                    // Ручка — примерно на уровне руки, на нижней половинке
+                    sf::CircleShape knob(BLOCK_SIZE * 0.045f);
+                    knob.setPosition({doorX + (open ? -BLOCK_SIZE * 0.05f : doorW - BLOCK_SIZE * 0.12f),
+                                      py + BLOCK_SIZE * 0.15f});
+                    knob.setFillColor(handle);
+                    window.draw(knob);
+                }
+                continue;
+            }
+
             tile.setTextureRect(block.getTextureRect());
             tile.setPosition({px - overlap, py - overlap});
             window.draw(tile);
+
+            // Листва акации/сакуры и трава под ними — тон биома кладём ПОВЕРХ полупрозрачным
+            // прямоугольником, а не через setColor(умножение): умножение на тёмно-зелёной
+            // текстуре может только затемнять, а не сдвигать цвет в розовый/жёлтый — отсюда
+            // была грязно-бордовая "трава" вместо розовой.
+            sf::Color overlayTint = sf::Color::Transparent;
+            if (block.isLeaf() && block.type != BlockType::LEAVES) {
+                overlayTint = block.getLeafTint();
+            } else if (block.type == BlockType::WOOD && world.biomeAt(x) == 3) {
+                overlayTint = sf::Color(45, 32, 22); // снежный биом — тёмно-коричневый ствол
+            }
+            // Земля/трава везде обычная — биом виден только по деревьям (и лепесткам сакуры),
+            // не по перекрашенной почве.
+            if (overlayTint.a > 0) {
+                sf::RectangleShape overlay({(float)BLOCK_SIZE + overlap * 2.f, (float)BLOCK_SIZE + overlap * 2.f});
+                overlay.setPosition({px - overlap, py - overlap});
+                overlay.setFillColor(sf::Color(overlayTint.r, overlayTint.g, overlayTint.b, 170));
+                window.draw(overlay);
+            }
 
             // Горящий TNT мигает белым, мигание ускоряется по мере приближения взрыва
             if (block.type == BlockType::TNT) {
@@ -1290,10 +1492,22 @@ void Game::render() {
                 }
             }
 
-            // Травинки над блоком травы — покачиваются от "ветра", если сверху воздух
+            // Травинки над блоком травы — покачиваются от "ветра", если сверху воздух.
+            // В снежном биоме вместо травинок — снежная шапка сверху блока, причём
+            // рисуем её всегда (даже под кроной дерева) — иначе под деревьями сквозь
+            // снег проглядывала бы голая зелёная трава.
+            bool topAir = !world.inBounds(x, y - 1) || !world.getBlock(x, y - 1).isSolid();
+            bool isSnowBiome = world.biomeAt(x) == 3;
+
             if (block.type == BlockType::GRASS) {
-                bool topAir = !world.inBounds(x, y - 1) || !world.getBlock(x, y - 1).isSolid();
-                if (topAir) {
+                if (isSnowBiome) {
+                    sf::RectangleShape snowCap({(float)BLOCK_SIZE + overlap * 2.f, BLOCK_SIZE * 0.28f});
+                    snowCap.setPosition({px - overlap, py - overlap});
+                    snowCap.setFillColor(sf::Color(240, 245, 250));
+                    window.draw(snowCap);
+                } else if (topAir) {
+                    sf::Color bladeColor = sf::Color(80, 160, 30); // везде обычный зелёный — биом виден по деревьям
+
                     for (int b = 0; b < 3; b++) {
                         int h = x * 928371 + b * 5237 + 17; // детерминированный "хэш" для стабильной позиции травинки
                         float offsetX     = 4.f + b * 10.f + (float)((h >> 3) % 5);
@@ -1301,11 +1515,19 @@ void Game::render() {
                         float sway = std::sin(animTime * 3.f + x * 0.7f + b * 1.3f) * 1.6f;
 
                         sf::RectangleShape blade({2.f, bladeHeight});
-                        blade.setFillColor(sf::Color(80, 160, 30));
+                        blade.setFillColor(bladeColor);
                         blade.setPosition({px + offsetX + sway, py - bladeHeight + 2.f});
                         window.draw(blade);
                     }
                 }
+            }
+
+            // В снежном биоме стволы и хвоя тоже припорошены снегом сверху
+            if (isSnowBiome && topAir && (block.type == BlockType::WOOD || block.type == BlockType::LEAVES_SNOWY)) {
+                sf::RectangleShape snowCap({(float)BLOCK_SIZE + overlap * 2.f, BLOCK_SIZE * 0.3f});
+                snowCap.setPosition({px - overlap, py - overlap});
+                snowCap.setFillColor(sf::Color(240, 245, 250, 230));
+                window.draw(snowCap);
             }
         }
     }
@@ -1359,30 +1581,22 @@ void Game::render() {
         overlay.setFillColor(sf::Color(10, 10, 40, (std::uint8_t)darkAlpha));
         window.draw(overlay);
 
-        // Факелы пробивают тьму тёплым светом (аддитивное смешивание поверх затемнения)
+        // Факелы пробивают тьму тёплым светом (аддитивное смешивание поверх затемнения) —
+        // тот же градиент, что и у солнца/луны: одна текстура с плавной альфой, без колец.
         if (darkAlpha > 1.f && !lightSources.empty()) {
             sf::RenderStates addStates;
             addStates.blendMode = sf::BlendAdd;
             float k = darkAlpha / 165.f; // сила свечения растёт вместе с темнотой
 
+            float radius = 42.f; // насколько далеко расходится свет одного факела/печи
+            float scale = radius / 128.f;
             for (const auto& src : lightSources) {
-                sf::CircleShape glowOuter(70.f);
-                glowOuter.setOrigin({70.f, 70.f});
-                glowOuter.setPosition(src);
-                glowOuter.setFillColor(sf::Color(255, 170, 80, (std::uint8_t)(40 * k)));
-                window.draw(glowOuter, addStates);
-
-                sf::CircleShape glowMid(42.f);
-                glowMid.setOrigin({42.f, 42.f});
-                glowMid.setPosition(src);
-                glowMid.setFillColor(sf::Color(255, 190, 110, (std::uint8_t)(75 * k)));
-                window.draw(glowMid, addStates);
-
-                sf::CircleShape glowInner(20.f);
-                glowInner.setOrigin({20.f, 20.f});
-                glowInner.setPosition(src);
-                glowInner.setFillColor(sf::Color(255, 215, 150, (std::uint8_t)(115 * k)));
-                window.draw(glowInner, addStates);
+                sf::Sprite glowSprite(glowTexture);
+                glowSprite.setOrigin({128.f, 128.f});
+                glowSprite.setScale({scale, scale});
+                glowSprite.setPosition(src);
+                glowSprite.setColor(sf::Color(255, 180, 90, (std::uint8_t)(200.f * k)));
+                window.draw(glowSprite, addStates);
             }
         }
     }

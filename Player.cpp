@@ -19,12 +19,14 @@ void Player::handleKeyPressed(sf::Keyboard::Key key) {
             onGround = false;
         }
     }
+    if (key == sf::Keyboard::Key::S) wantDown = true;
 }
 
 void Player::handleKeyReleased(sf::Keyboard::Key key) {
     if (key == sf::Keyboard::Key::A) moveLeft  = false;
     if (key == sf::Keyboard::Key::D) moveRight = false;
     if (key == sf::Keyboard::Key::W || key == sf::Keyboard::Key::Space) wantUp = false;
+    if (key == sf::Keyboard::Key::S) wantDown = false;
 }
 
 bool Player::isInWater(const World& world) const {
@@ -32,6 +34,18 @@ bool Player::isInWater(const World& world) const {
     int cx = (int)((x + width  / 2.f) / BLOCK_SIZE);
     int cy = (int)((y + height / 2.f) / BLOCK_SIZE);
     return world.inBounds(cx, cy) && world.getBlock(cx, cy).isWater();
+}
+
+bool Player::checkLadder(const World& world) const {
+    // Проверяем весь столбец, который занимает игрок по высоте (он 2 блока ростом) —
+    // достаточно, чтобы хотя бы одна клетка была лестницей, чтобы за неё цепляться
+    int cx = (int)((x + width / 2.f) / BLOCK_SIZE);
+    int topRow = (int)(y / BLOCK_SIZE);
+    int botRow = (int)((y + height - 1) / BLOCK_SIZE);
+    for (int by = topRow; by <= botRow; by++)
+        if (world.inBounds(cx, by) && world.getBlock(cx, by).isLadder())
+            return true;
+    return false;
 }
 
 void Player::update(float deltaTime, const World& world) {
@@ -49,7 +63,17 @@ void Player::update(float deltaTime, const World& world) {
     justEnteredWater = inWater && !wasInWater; // вошёл в воду именно сейчас
     wasInWater = inWater;
 
-    if (inWater) {
+    bool onLadder = checkLadder(world);
+    onLadderState = onLadder;
+
+    if (onLadder) {
+        // На лестнице гравитация не действует: висим на месте, если ничего не жмём,
+        // поднимаемся по W и спускаемся по S — как в оригинале.
+        vx *= 0.7f; // чуть медленнее двигаемся в стороны, вцепившись в лестницу
+        if (wantUp)        vy = -CLIMB_SPEED;
+        else if (wantDown) vy =  CLIMB_SPEED;
+        else                vy = 0.f;
+    } else if (inWater) {
         // В воде: слабее гравитация, движемся медленнее, максимальная скорость погружения ограничена
         vx *= 0.6f;
         vy += GRAVITY * 0.25f * deltaTime;   // тонем медленно
@@ -68,8 +92,8 @@ void Player::update(float deltaTime, const World& world) {
     y += vy * deltaTime;
     resolveCollisions(world);
 
-    // Урон от падения — только если НЕ в воде (вода смягчает)
-    if (!inWater && !wasOnGround && onGround && impactVy > 0.f) {
+    // Урон от падения — не считаем, если смягчили воду или спускались по лестнице
+    if (!inWater && !onLadder && !wasOnGround && onGround && impactVy > 0.f) {
         float fallHeight = (impactVy * impactVy) / (2.f * GRAVITY);
         if (fallHeight > FALL_DAMAGE_SAFE_HEIGHT) {
             float extraBlocks = (fallHeight - FALL_DAMAGE_SAFE_HEIGHT) / BLOCK_SIZE;

@@ -8,6 +8,9 @@ enum class BlockType {
     STONE,
     WOOD,
     LEAVES,
+    LEAVES_ACACIA, // листва акации — тот же тайл, что и LEAVES, но с другим тоном (см. getLeafTint)
+    LEAVES_SAKURA, // листва сакуры — розовая
+    LEAVES_SNOWY,  // листва снежного биома — тёмно-зелёная, со снежной шапкой сверху
     SAND,
     GRAVEL,
     TNT,
@@ -26,6 +29,11 @@ enum class BlockType {
     WORKBENCH,
     CHEST,
     FURNACE,
+    LADDER,
+    DOOR,          // закрытая дверь (нижняя половина) — предмет в инвентаре и блок в мире по умолчанию
+    DOOR_OPEN,     // открытая дверь (нижняя половина) — только состояние в мире
+    DOOR_TOP,      // верхняя половина закрытой двери — ставится/ломается вместе с нижней автоматически
+    DOOR_TOP_OPEN, // верхняя половина открытой двери
 
     // Эти четыре — не настоящие блоки, а предметы (еда и слитки из печи).
     // Их нельзя поставить в мир, только держать в инвентаре.
@@ -51,7 +59,35 @@ struct Block {
     }
 
     bool isSolid() const {
-        return type != BlockType::AIR && type != BlockType::TORCH && type != BlockType::WATER && !isItem();
+        return type != BlockType::AIR && type != BlockType::TORCH && type != BlockType::WATER &&
+               type != BlockType::LADDER &&
+               type != BlockType::DOOR_OPEN && type != BlockType::DOOR_TOP_OPEN && !isItem();
+    }
+
+    // Любая из 4 половинок двери (закрытая/открытая, верх/низ)
+    bool isDoorPart() const {
+        return type == BlockType::DOOR || type == BlockType::DOOR_OPEN ||
+               type == BlockType::DOOR_TOP || type == BlockType::DOOR_TOP_OPEN;
+    }
+    bool isDoorTop() const { return type == BlockType::DOOR_TOP || type == BlockType::DOOR_TOP_OPEN; }
+    bool isDoorOpenState() const { return type == BlockType::DOOR_OPEN || type == BlockType::DOOR_TOP_OPEN; }
+
+    bool isLadder() const { return type == BlockType::LADDER; }
+
+    bool isLeaf() const {
+        return type == BlockType::LEAVES || type == BlockType::LEAVES_ACACIA ||
+               type == BlockType::LEAVES_SAKURA || type == BlockType::LEAVES_SNOWY;
+    }
+    // Акация и сакура используют ровно ту же текстуру листвы, что и обычное дерево,
+    // просто с другим цветовым тоном поверх (через sprite.setColor) — так не нужно
+    // рисовать отдельные тайлы в атласе ради всего одного нового оттенка листьев.
+    sf::Color getLeafTint() const {
+        switch (type) {
+            case BlockType::LEAVES_ACACIA: return sf::Color(110, 120, 55);  // приглушённый оливковый, не жёлтый
+            case BlockType::LEAVES_SAKURA: return sf::Color(215, 85, 150);  // насыщенный розовый/малиновый
+            case BlockType::LEAVES_SNOWY:  return sf::Color(35, 65, 35);    // тёмно-зелёная хвоя
+            default:                       return sf::Color::White;        // без тона — обычная листва
+        }
     }
 
     bool isWater() const {
@@ -82,6 +118,9 @@ struct Block {
             case BlockType::STONE:  return sf::Color(100, 100, 100);
             case BlockType::WOOD:   return sf::Color(90, 65, 35);
             case BlockType::LEAVES: return sf::Color(40, 110, 25);
+            case BlockType::LEAVES_ACACIA: return sf::Color(150, 145, 45);
+            case BlockType::LEAVES_SAKURA: return sf::Color(235, 130, 175);
+            case BlockType::LEAVES_SNOWY:  return sf::Color(35, 65, 35);
             case BlockType::SAND:   return sf::Color(208, 189, 137);
             case BlockType::GRAVEL: return sf::Color(128, 122, 116);
             case BlockType::TNT:    return sf::Color(196, 40, 32);
@@ -100,6 +139,11 @@ struct Block {
             case BlockType::WORKBENCH: return sf::Color(137, 101, 60);
             case BlockType::CHEST:     return sf::Color(109, 74, 38);
             case BlockType::FURNACE:   return sf::Color(115, 115, 115);
+            case BlockType::LADDER:    return sf::Color(153, 114, 66);
+            case BlockType::DOOR:
+            case BlockType::DOOR_OPEN:
+            case BlockType::DOOR_TOP:
+            case BlockType::DOOR_TOP_OPEN: return sf::Color(133, 94, 52);
             case BlockType::RAW_CHICKEN:    return sf::Color(235, 180, 170);
             case BlockType::COOKED_CHICKEN: return sf::Color(180, 120, 60);
             case BlockType::RAW_BEEF:       return sf::Color(205, 70, 70);
@@ -159,6 +203,9 @@ struct Block {
             case BlockType::DIRT:   index = 2; break;   // земля
             case BlockType::WOOD:   index = 3; break;   // дерево/доски
             case BlockType::LEAVES: index = 4; break;   // листва
+            case BlockType::LEAVES_ACACIA: index = 4; break; // тот же тайл, цвет — через getLeafTint()
+            case BlockType::LEAVES_SAKURA: index = 4; break;
+            case BlockType::LEAVES_SNOWY:  index = 4; break;
             case BlockType::STONE:  index = 7; break;   // камень
             case BlockType::GRAVEL: index = 8; break;   // булыжник/гравий
             case BlockType::SAND:   index = 9; break;   // песок

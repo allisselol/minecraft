@@ -105,6 +105,34 @@ BlockType World::oreAt(int x, int y, int surfaceY) const {
     return BlockType::AIR; // руды нет — останется обычный камень
 }
 
+int World::biomeAt(int x) const {
+    // Биомы больше не накладываются друг на друга (раньше снег был отдельным шумом
+    // поверх остальных трёх и мог "врезаться" в середину акации/сакуры). Теперь мир
+    // просто поделен на подряд идущие непересекающиеся участки, у каждого — один биом:
+    // 0 — обычный дуб, 1 — акация, 2 — сакура, 3 — снег.
+    const int SEGMENT_WIDTH = 70;
+    int seg = x / SEGMENT_WIDTH;
+
+    auto rawBiome = [&](int s) -> int {
+        unsigned int h = (unsigned int)((s + 1) * 2654435761u + seed * 668265263u);
+        h ^= h >> 13; h *= 1274126177u; h ^= h >> 16;
+        return (int)(h % 4u);
+    };
+
+    // Идём от начала мира и досчитываем до нужного участка, каждый раз сверяясь
+    // с итоговым (а не сырым) биомом предыдущего — иначе после сдвига на "не повторять"
+    // соседние участки всё равно иногда могли случайно совпасть.
+    int prevFinal = -1;
+    int biome = 0;
+    for (int s = 0; s <= seg; s++) {
+        biome = rawBiome(s);
+        if (s > 0 && biome == prevFinal)
+            biome = (biome + 1) % 4;
+        prevFinal = biome;
+    }
+    return biome;
+}
+
 void World::generateWorld() {
     const int BASE_HEIGHT = WORLD_HEIGHT / 2;
     const int DIRT_DEPTH  = 5;
@@ -148,13 +176,15 @@ void World::generateWorld() {
         }
     }
 
-    // Деревья — высокие с круглой кроной
+    // Деревья — высокие с круглой кроной (или другой формой/цветом — см. биом).
+    // Частота одинаковая для всех биомов — как и было изначально, чтобы не мешать ходить.
     srand(seed);
     for (int x = 6; x < WORLD_WIDTH - 6; x++) {
-        if (rand() % 8 != 0) continue;
+        if (rand() % 8 != 0) continue; // как и было изначально — не слишком часто
 
         int sy = surfaceY[x];
         int treeHeight = 7 + rand() % 4; // высокие деревья 7-10
+        int biome = biomeAt(x);
 
         // Ствол
         for (int y = sy - treeHeight; y < sy; y++) {
@@ -162,9 +192,24 @@ void World::generateWorld() {
                 map[y][x] = Block(BlockType::WOOD);
         }
 
-        // Круглая крона — эллипс
+        // Крона: обычный дуб — круглая; акация — приплюснутая и широкая "зонтиком";
+        // сакура — пышная и чуть шире дуба, только розовая
         int crownY = sy - treeHeight;
         int rX = 3, rY = 3;
+        BlockType leafType = BlockType::LEAVES;
+
+        if (biome == 1) {
+            leafType = BlockType::LEAVES_ACACIA;
+            rX = 4; rY = 3;        // широкая, но округлая крона-кустик (не плоский блин)
+            crownY += 1;           // сидит чуть ниже верхушки ствола
+        } else if (biome == 2) {
+            leafType = BlockType::LEAVES_SAKURA;
+            rX = 4; rY = 3;       // пышнее обычного дуба
+        } else if (biome == 3) {
+            leafType = BlockType::LEAVES_SNOWY;
+            rX = 3; rY = 3;       // как обычный дуб — тёмная хвоя со снегом сверху достаточно отличает
+        }
+
         for (int ly = crownY - rY; ly <= crownY + rY; ly++) {
             for (int lx = x - rX; lx <= x + rX; lx++) {
                 if (ly < 0 || ly >= WORLD_HEIGHT) continue;
@@ -173,7 +218,7 @@ void World::generateWorld() {
                 float dx = (float)(lx - x) / rX;
                 float dy = (float)(ly - crownY) / rY;
                 if (dx*dx + dy*dy <= 1.2f && map[ly][lx].type == BlockType::AIR)
-                    map[ly][lx] = Block(BlockType::LEAVES);
+                    map[ly][lx] = Block(leafType);
             }
         }
     }

@@ -62,6 +62,24 @@ Inventory::Inventory() : selectedSlot(0) {
         furnace.resultCount = 1;
         shapedRecipes.push_back(furnace);
     }
+    {
+        // Дверь: 2 колонки досок на всю высоту сетки — как в оригинале (6 досок -> 3 двери)
+        ShapedRecipe door{};
+        BlockType pattern[3][3] = {
+            { BlockType::PLANKS, BlockType::PLANKS, BlockType::AIR },
+            { BlockType::PLANKS, BlockType::PLANKS, BlockType::AIR },
+            { BlockType::PLANKS, BlockType::PLANKS, BlockType::AIR },
+        };
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+                door.pattern[r][c] = pattern[r][c];
+        door.result = BlockType::DOOR;
+        door.resultCount = 3;
+        shapedRecipes.push_back(door);
+    }
+
+    // Лестница — рецепт простой (не требует верстака), пачкой по 3, как в оригинале
+    recipes.push_back({ {{BlockType::PLANKS, 2}}, BlockType::LADDER, 3 });
 }
 
 void Inventory::selectSlot(int index) {
@@ -839,6 +857,46 @@ void Inventory::drawIcon(sf::RenderWindow& window, BlockType type, float sx, flo
         return;
     }
 
+    // Лестница — рисуем процедурно: два рельса и перекладины между ними
+    if (type == BlockType::LADDER) {
+        sf::Color rail(140, 100, 55);
+        sf::Color rung(170, 125, 70);
+        float railW = size * 0.14f;
+        sf::RectangleShape left({railW, size * 0.82f});
+        left.setPosition({sx + size * 0.12f, sy + size * 0.09f});
+        left.setFillColor(rail);
+        window.draw(left);
+        sf::RectangleShape right({railW, size * 0.82f});
+        right.setPosition({sx + size * 0.74f, sy + size * 0.09f});
+        right.setFillColor(rail);
+        window.draw(right);
+        for (int i = 0; i < 3; i++) {
+            sf::RectangleShape r({size * 0.5f, size * 0.1f});
+            r.setPosition({sx + size * 0.26f, sy + size * (0.2f + i * 0.28f)});
+            r.setFillColor(rung);
+            window.draw(r);
+        }
+        return;
+    }
+
+    // Дверь — рисуем процедурно: деревянная панель с рамкой и ручкой
+    if (type == BlockType::DOOR || type == BlockType::DOOR_OPEN) {
+        sf::Color panel(150, 108, 60);
+        sf::Color frame(105, 74, 40);
+        sf::Color handle(230, 200, 90);
+        sf::RectangleShape door({size * 0.62f, size * 0.86f});
+        door.setPosition({sx + size * 0.18f, sy + size * 0.08f});
+        door.setFillColor(panel);
+        door.setOutlineColor(frame);
+        door.setOutlineThickness(size * 0.03f);
+        window.draw(door);
+        sf::CircleShape knob(size * 0.045f);
+        knob.setPosition({sx + size * 0.66f, sy + size * 0.48f});
+        knob.setFillColor(handle);
+        window.draw(knob);
+        return;
+    }
+
     // Слитки железа/золота — рисуем процедурно: трапециевидный брусок
     if (type == BlockType::IRON_INGOT || type == BlockType::GOLD_INGOT) {
         bool gold = (type == BlockType::GOLD_INGOT);
@@ -874,6 +932,14 @@ void Inventory::drawIcon(sf::RenderWindow& window, BlockType type, float sx, flo
         icon.setPosition({sx, sy});
         if (type == BlockType::WATER) icon.setColor(sf::Color(255, 255, 255, 200));
         window.draw(icon);
+        // Акация/сакура — тон поверх (умножение на тёмно-зелёном только темнит, не розовеет)
+        if (type == BlockType::LEAVES_ACACIA || type == BlockType::LEAVES_SAKURA) {
+            sf::Color t = Block(type).getLeafTint();
+            sf::RectangleShape overlay({size, size});
+            overlay.setPosition({sx, sy});
+            overlay.setFillColor(sf::Color(t.r, t.g, t.b, 150));
+            window.draw(overlay);
+        }
         return;
     }
 
@@ -1047,6 +1113,15 @@ void Inventory::drawRecipeRow(sf::RenderWindow& window, const Recipe& recipe, fl
     recipeHitboxes.push_back(sf::FloatRect({rx, ry}, {rowW, rowH}));
 }
 
+void Inventory::computeCraftLayout(int& cols, int& rowsPerCol) const {
+    int n = (int)recipes.size();
+    if (n <= 0) { cols = 1; rowsPerCol = 0; return; }
+    const int maxRowsPerCol = 5; // больше — начинаем новую колонку, а не растягиваем окно вниз
+    cols = (n + maxRowsPerCol - 1) / maxRowsPerCol;
+    if (cols < 1) cols = 1;
+    rowsPerCol = (n + cols - 1) / cols; // реальное число строк при таком числе колонок
+}
+
 void Inventory::drawCraftingSection(sf::RenderWindow& window, float x, float y) {
     recipeHitboxes.clear();
 
@@ -1054,12 +1129,13 @@ void Inventory::drawCraftingSection(sf::RenderWindow& window, float x, float y) 
     float rowH = 2 * 24.f + 2.f;              // высота одной строки рецепта (под cellSize=24)
     float colGap = 30.f;
     float colW = 200.f;                        // ширина колонки рецепта
-    int perColumn = (int)recipes.size() >= 4 ? (int(recipes.size()) + 1) / 2 : (int)recipes.size();
-    if (perColumn <= 0) return;
+    int cols, rowsPerCol;
+    computeCraftLayout(cols, rowsPerCol);
+    if (rowsPerCol <= 0) return;
 
     for (size_t i = 0; i < recipes.size(); i++) {
-        int col = (int)i / perColumn;          // 0 — левая колонка, 1 — правая
-        int row = (int)i % perColumn;
+        int col = (int)i / rowsPerCol;
+        int row = (int)i % rowsPerCol;
         float rx = x + col * (colW + colGap);
         float ry = y + row * (rowH + rowGap);
         drawRecipeRow(window, recipes[i], rx, ry, canCraft(recipes[i]));
@@ -1098,6 +1174,22 @@ void Inventory::drawFullScreen(sf::RenderWindow& window) {
     window.draw(overlay);
 
     float winW = 580.f, winH = 490.f;
+
+    // Размер окна подстраиваем под реальное число рецептов, чтобы список никогда не
+    // обрезался снизу и не вылезал за края, сколько бы рецептов ни было добавлено потом.
+    {
+        int cols, rowsPerCol;
+        computeCraftLayout(cols, rowsPerCol);
+        float rowGap = 10.f, rowH = 2 * 24.f + 2.f, colGap = 30.f, colW = 200.f;
+        float craftW = cols * colW + std::max(0, cols - 1) * colGap;
+        float craftH = rowsPerCol > 0 ? rowsPerCol * rowH + std::max(0, rowsPerCol - 1) * rowGap : 0.f;
+
+        float invGridW = 5 * (SLOT_SIZE + 4.f) - 4.f; // 5 колонок личного инвентаря
+        float topPad = 30.f, invH = 2 * (SLOT_SIZE + 4.f), sepGap = 26.f, sidePad = 40.f, bottomPad = 30.f;
+
+        winW = std::max(invGridW, craftW) + sidePad * 2.f;
+        winH = topPad + invH + sepGap + craftH + bottomPad;
+    }
     float winX = (800.f - winW) / 2.f, winY = (600.f - winH) / 2.f;
 
     // Серое окно как в майнкрафте
