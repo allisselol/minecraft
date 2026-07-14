@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <utility>
+#include <string>
 #include "World.hpp"
 #include "Player.hpp"
 #include "Inventory.hpp"
@@ -150,11 +151,35 @@ private:
 
     sf::RectangleShape cursor;
 
+    sf::Font font;       // для текста в меню (кнопки/заголовок) — не используется в самой игре
+    bool fontLoaded = false;
+    sf::Texture menuBgTexture; // фоновая картинка для экранов меню
+    bool menuBgLoaded = false;
+
     void handleEvents();
     void handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePixelPos);
     void update(float deltaTime);
     void drawSky();
     void render();
+
+    // === Экраны меню и сохранение/загрузка ===
+    enum class GameState { MainMenu, WorldMenu, Playing };
+    GameState state = GameState::MainMenu;
+
+    static const std::string SAVE_FILE; // путь к файлу сохранения на диске
+
+    sf::FloatRect playButtonBox;      // "Играть" на главном экране
+    sf::FloatRect continueButtonBox;  // "Продолжить игру" (только если есть сохранение)
+    sf::FloatRect newWorldButtonBox;  // "Новый мир"
+
+    bool hasSaveFile() const;
+    void startNewWorld();  // генерирует свежий мир, спавнит игрока/мобов заново
+    void saveGame() const; // сохраняет текущее состояние в SAVE_FILE
+    bool loadGame();       // загружает состояние из SAVE_FILE; false, если не получилось
+
+    void renderMainMenu();
+    void renderWorldMenu();
+    void handleMenuClick(sf::Vector2i pixelPos);
 
 public:
     Game();

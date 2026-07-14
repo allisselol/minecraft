@@ -16,6 +16,10 @@ private:
     bool rainLoaded = false;
     bool rainPlaying = false;
 
+    sf::Music menuMusic;        // фоновая музыка в меню — играет, пока не зашли в мир
+    bool menuMusicLoaded = false;
+    bool menuMusicPlaying = false;
+
     /*void load(const std::string& name, const std::string& path) {
         sf::SoundBuffer buf;
         if (buf.loadFromFile(path))
@@ -81,6 +85,15 @@ public:
         } else {
             std::cerr << "Failed to load: sounds/rain.ogg" << std::endl;
         }
+
+        // Фоновая музыка в меню — тоже стримится и зациклена, звучит, пока не вошли в мир
+        if (menuMusic.openFromFile("sounds/menu_music.ogg")) {
+            menuMusic.setLooping(true);
+            menuMusic.setVolume(50.f);
+            menuMusicLoaded = true;
+        } else {
+            std::cerr << "Failed to load: sounds/menu_music.ogg" << std::endl;
+        }
     }
 
     // Управление фоновым дождём (вызывать при смене погоды)
@@ -94,6 +107,20 @@ public:
         if (rainLoaded && rainPlaying) {
             rainMusic.stop();
             rainPlaying = false;
+        }
+    }
+
+    // Управление музыкой меню (вызывать при входе/выходе из меню)
+    void startMenuMusic() {
+        if (menuMusicLoaded && !menuMusicPlaying) {
+            menuMusic.play();
+            menuMusicPlaying = true;
+        }
+    }
+    void stopMenuMusic() {
+        if (menuMusicLoaded && menuMusicPlaying) {
+            menuMusic.stop();
+            menuMusicPlaying = false;
         }
     }
 

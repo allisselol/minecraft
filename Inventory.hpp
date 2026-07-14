@@ -106,6 +106,11 @@ public:
     BlockType getSelectedType() const;
     int getSelectedSlot() const { return selectedSlot; }
     int getSlotCount() const { return (int)slots.size(); }
+    BlockType getSlotType(int i) const { return (i >= 0 && i < (int)slots.size()) ? slots[i].type : BlockType::AIR; }
+    int getSlotAmount(int i) const { return (i >= 0 && i < (int)slots.size()) ? slots[i].count : 0; }
+    void setSlot(int i, BlockType type, int count) {
+        if (i >= 0 && i < (int)slots.size()) { slots[i].type = type; slots[i].count = count; }
+    }
 
     // Настоящая (survival) логика инвентаря
     bool hasSelected() const;      // можно ли поставить блок из выбранного слота

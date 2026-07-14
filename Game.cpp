@@ -1,9 +1,13 @@
 #include "Game.hpp"
 #include <algorithm>
 #include <iostream>
+#include <fstream>
+#include <cstdint>
 #include <cmath>
 #include <cstdlib>
 #include <random>
+
+const std::string Game::SAVE_FILE = "savegame.dat";
 
 Game::Game()
     : window(sf::VideoMode({800, 600}), "Minecraft 2D")
@@ -22,16 +26,6 @@ Game::Game()
     cursor.setFillColor(sf::Color(255, 255, 255, 50));
     cursor.setOutlineColor(sf::Color(0, 0, 0, 180));
     cursor.setOutlineThickness(2.f);
-
-    // Ставим игрока на реальную поверхность в колонке спавна (а не на фиксированную высоту,
-    // иначе можно оказаться внутри камня/пещеры или на кроне дерева).
-    {
-        int scx = WORLD_WIDTH / 2;
-        int surfaceRow = findGroundSurface(scx);
-        spawnX = scx * (float)BLOCK_SIZE;
-        spawnY = (surfaceRow - 3) * (float)BLOCK_SIZE; // на 3 блока выше поверхности (высота игрока + запас)
-        player.respawn(spawnX, spawnY);
-    }
 
     // Позиции звёзд — фиксированные точки на фоне неба (не привязаны к миру)
     for (int i = 0; i < 60; i++) {
@@ -63,6 +57,32 @@ Game::Game()
     }
     blockTexture.setSmooth(false); // чёткие пиксели без размытия
     inventory.setBlockTexture(&blockTexture); // иконки инвентаря рисуются реальной текстурой
+
+    // Шрифт для текста в меню — своего файла шрифта в проекте нет, пробуем системный (macOS).
+    // Если не найдётся ни один — меню всё равно работает, просто без подписей на кнопках.
+    {
+        const char* candidates[] = {
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/SFNSRounded.ttf",
+        };
+        for (const char* path : candidates) {
+            if (font.openFromFile(path)) {
+                fontLoaded = true;
+                break;
+            }
+        }
+        if (!fontLoaded) std::cerr << "Не нашла системный шрифт — меню будет без текста на кнопках" << std::endl;
+    }
+
+    // Фон для экранов меню
+    if (menuBgTexture.loadFromFile("textures/menu_bg.png")) {
+        menuBgLoaded = true;
+        menuBgTexture.setSmooth(false);
+    } else {
+        std::cerr << "Failed to load: textures/menu_bg.png" << std::endl;
+    }
 
     // Генерируем мягкий радиальный градиент один раз при старте: белый круг с плавно
     // (по smoothstep) затухающей к краю альфой — без единой видимой границы/кольца.
@@ -126,212 +146,35 @@ Game::Game()
     }
     inventory.setSakuraLeafTexture(&sakuraLeafTexture);
 
-    // Спавним несколько цыплят на поверхности в случайных местах мира
-    for (int i = 0; i < MAX_CHICKENS; i++)
-        spawnChicken();
-    chickenRespawnTimer = 15.f + rand() % 15;
+    // Мир и мобы больше НЕ создаются здесь — игрок сначала видит главный экран и
+    // выбирает "Продолжить" или "Новый мир" (см. startNewWorld()/loadGame()).
 
-    // И несколько коров рядом с ними
-    for (int i = 0; i < MAX_COWS; i++)
-        spawnCow();
-    cowRespawnTimer = 20.f + rand() % 15;
-
-    // И овец
-    for (int i = 0; i < MAX_SHEEP; i++)
-        spawnSheep();
-    sheepRespawnTimer = 20.f + rand() % 15;
+    sounds.startMenuMusic(); // играет, пока не зайдём в мир
 }
 
-int Game::findGroundSurface(int bx) const {
-    for (int by = 0; by < WORLD_HEIGHT; by++) {
-        Block b = world.getBlock(bx, by);
-        if (!b.isSolid()) continue;
-        // Листва и ствол — это дерево, а не земля; спавнить моба на кроне не годится
-        if (b.isLeaf() || b.type == BlockType::WOOD) continue;
-        return by;
-    }
-    return 0;
-}
 
-void Game::spawnChicken() {
-    int bx = 5 + rand() % (WORLD_WIDTH - 10);
-    int surfaceY = findGroundSurface(bx);
-    float spawnPx = bx * (float)BLOCK_SIZE + 4.f;
-    float spawnPy = (surfaceY - 1) * (float)BLOCK_SIZE;
-    chickens.emplace_back(spawnPx, spawnPy);
-}
-
-void Game::killChicken(size_t index) {
-    float cx = chickens[index].getX() + chickens[index].getWidth()  / 2.f;
-    float cy = chickens[index].getY() + chickens[index].getHeight() / 2.f;
-
-    // Пух и перья вместо обычных частиц блока
-    static std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f);
-    std::uniform_real_distribution<float> speedDist(50.f, 140.f);
-    std::uniform_real_distribution<float> lifeDist(0.35f, 0.6f);
-    sf::Color featherColors[2] = { sf::Color(250, 209, 60), sf::Color(255, 245, 220) };
-
-    for (int i = 0; i < 8; i++) {
-        Particle p;
-        float angle = angleDist(rng);
-        float speed = speedDist(rng);
-        p.position    = {cx, cy};
-        p.velocity    = {std::cos(angle) * speed, std::sin(angle) * speed - 80.f};
-        p.color       = featherColors[i % 2];
-        p.size        = 3.f + (float)(rand() % 3);
-        p.maxLifetime = lifeDist(rng);
-        p.lifetime    = p.maxLifetime;
-        particles.push_back(p);
-    }
-
-    sounds.playChickenDeath(); // звук гибели курицы
-    inventory.addItem(BlockType::RAW_CHICKEN, FOOD_PER_CHICKEN); // сырое мясо — есть сырым или приготовить в печи
-
-    chickens.erase(chickens.begin() + index);
-}
-
-void Game::spawnCow() {
-    int bx = 5 + rand() % (WORLD_WIDTH - 10);
-    int surfaceY = findGroundSurface(bx);
-    float spawnPx = bx * (float)BLOCK_SIZE;
-    float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE; // корова выше курицы — она крупнее
-    cows.emplace_back(spawnPx, spawnPy);
-}
-
-void Game::killCow(size_t index) {
-    float cx = cows[index].getX() + cows[index].getWidth()  / 2.f;
-    float cy = cows[index].getY() + cows[index].getHeight() / 2.f;
-
-    // Клочки шерсти вместо перьев
-    static std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f);
-    std::uniform_real_distribution<float> speedDist(50.f, 140.f);
-    std::uniform_real_distribution<float> lifeDist(0.35f, 0.6f);
-    sf::Color furColors[2] = { sf::Color(150, 100, 70), sf::Color(240, 235, 225) };
-
-    for (int i = 0; i < 8; i++) {
-        Particle p;
-        float angle = angleDist(rng);
-        float speed = speedDist(rng);
-        p.position    = {cx, cy};
-        p.velocity    = {std::cos(angle) * speed, std::sin(angle) * speed - 80.f};
-        p.color       = furColors[i % 2];
-        p.size        = 3.f + (float)(rand() % 3);
-        p.maxLifetime = lifeDist(rng);
-        p.lifetime    = p.maxLifetime;
-        particles.push_back(p);
-    }
-
-    sounds.playCowHurt(); // звук гибели коровы
-    inventory.addItem(BlockType::RAW_BEEF, BEEF_PER_COW); // сырая говядина — есть сырой или приготовить в печи
-
-    cows.erase(cows.begin() + index);
-}
-
-void Game::spawnSheep() {
-    int bx = 5 + rand() % (WORLD_WIDTH - 10);
-    int surfaceY = findGroundSurface(bx);
-    float spawnPx = bx * (float)BLOCK_SIZE;
-    float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE; // как у коровы — овца крупнее курицы, нужен запас
-    sheep.emplace_back(spawnPx, spawnPy);
-}
-
-void Game::killSheep(size_t index) {
-    float cx = sheep[index].getX() + sheep[index].getWidth()  / 2.f;
-    float cy = sheep[index].getY() + sheep[index].getHeight() / 2.f;
-
-    // Клочки шерсти разлетаются при добыче
-    static std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f);
-    std::uniform_real_distribution<float> speedDist(50.f, 140.f);
-    std::uniform_real_distribution<float> lifeDist(0.35f, 0.6f);
-    sf::Color woolColor(240, 240, 235);
-
-    for (int i = 0; i < 8; i++) {
-        Particle p;
-        float angle = angleDist(rng);
-        float speed = speedDist(rng);
-        p.position    = {cx, cy};
-        p.velocity    = {std::cos(angle) * speed, std::sin(angle) * speed - 80.f};
-        p.color       = woolColor;
-        p.size        = 3.f + (float)(rand() % 3);
-        p.maxLifetime = lifeDist(rng);
-        p.lifetime    = p.maxLifetime;
-        particles.push_back(p);
-    }
-
-    sounds.playSheepSound(); // блеяние овцы
-    inventory.addItem(BlockType::WOOL, WOOL_PER_SHEEP); // шерсть — на кровать
-
-    sheep.erase(sheep.begin() + index);
-}
-
-void Game::spawnEnemy() {
-    // Спавним врага на поверхности, но не слишком близко к игроку (не менее 10 блоков)
-    int px = (int)(player.getX() / BLOCK_SIZE);
-    int bx;
-    int tries = 0;
-    do {
-        bx = 5 + rand() % (WORLD_WIDTH - 10);
-        tries++;
-    } while (std::abs(bx - px) < 10 && tries < 20);
-
-    int surfaceY = findGroundSurface(bx);
-    float spawnPx = bx * (float)BLOCK_SIZE + 3.f;
-    float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE;
-
-    // Равный шанс каждого типа моба — по 25%
-    int roll = rand() % 4;
-    EnemyType t;
-    if (roll == 0)      t = EnemyType::STALKER;
-    else if (roll == 1) t = EnemyType::CREEPER;
-    else if (roll == 2) t = EnemyType::ARCHER;
-    else                t = EnemyType::JUMPER;
-
-    enemies.emplace_back(spawnPx, spawnPy, t);
-}
-
-void Game::killEnemy(size_t index) {
-    float cx = enemies[index].getX() + enemies[index].getWidth()  / 2.f;
-    float cy = enemies[index].getY() + enemies[index].getHeight() / 2.f;
-
-    static std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f);
-    std::uniform_real_distribution<float> speedDist(60.f, 160.f);
-    std::uniform_real_distribution<float> lifeDist(0.35f, 0.6f);
-    sf::Color colors[2] = { sf::Color(72, 96, 58), sf::Color(54, 74, 42) };
-
-    for (int i = 0; i < 10; i++) {
-        Particle p;
-        float angle = angleDist(rng);
-        float speed = speedDist(rng);
-        p.position    = {cx, cy};
-        p.velocity    = {std::cos(angle) * speed, std::sin(angle) * speed - 60.f};
-        p.color       = colors[i % 2];
-        p.size        = 3.f + (float)(rand() % 3);
-        p.maxLifetime = lifeDist(rng);
-        p.lifetime    = p.maxLifetime;
-        particles.push_back(p);
-    }
-
-    // Звук смерти лучника — слышен в радиусе 5 блоков
-    if (enemies[index].getType() == EnemyType::ARCHER) {
-        float ddx = enemies[index].getX() - player.getX();
-        float ddy = enemies[index].getY() - player.getY();
-        float d = std::sqrt(ddx*ddx + ddy*ddy) / BLOCK_SIZE;
-        sounds.playAt("enemy_death", d, 5.f);
-    } else {
-        sounds.playDig(BlockType::STONE);
-    }
-    enemies.erase(enemies.begin() + index);
-}
 
 void Game::run() {
     sf::Clock clock;
     sf::Clock stepClock;
     while (window.isOpen()) {
         float deltaTime = clock.restart().asSeconds();
+
+        if (state != GameState::Playing) {
+            // На экранах меню обрабатываем только закрытие окна и клики по кнопкам —
+            // никакой игровой логики (мира ещё может не быть) в этом состоянии не крутим.
+            while (const std::optional event = window.pollEvent()) {
+                if (event->is<sf::Event::Closed>()) window.close();
+                if (const auto* mb = event->getIf<sf::Event::MouseButtonPressed>()) {
+                    if (mb->button == sf::Mouse::Button::Left)
+                        handleMenuClick(sf::Vector2i(mb->position.x, mb->position.y));
+                }
+            }
+            if (state == GameState::MainMenu) renderMainMenu();
+            else if (state == GameState::WorldMenu) renderWorldMenu();
+            continue;
+        }
+
         handleEvents();
         update(deltaTime);
 
@@ -365,8 +208,10 @@ void Game::run() {
 
 void Game::handleEvents() {
     while (const std::optional event = window.pollEvent()) {
-        if (event->is<sf::Event::Closed>())
+        if (event->is<sf::Event::Closed>()) {
+            saveGame(); // сохраняем прогресс перед выходом
             window.close();
+        }
 
         if (const auto* kp = event->getIf<sf::Event::KeyPressed>()) {
             if (kp->code == sf::Keyboard::Key::E) {
@@ -1244,228 +1089,6 @@ float Game::getBrightness() const {
     return (1.f - std::cos(phase * 2.f * 3.14159265f)) * 0.5f;
 }
 
-void Game::updateWeather(float deltaTime) {
-    // Облака медленно плывут вправо, при уходе за край возвращаются слева
-    for (auto& c : cloudPositions) {
-        c.x += 8.f * deltaTime; // скорость ветра
-        if (c.x > 850.f) {
-            c.x = -100.f;
-            c.y = 40.f + (float)(rand() % 180);
-        }
-    }
-
-    // Смена погоды примерно раз в 30-60 секунд
-    weatherTimer -= deltaTime;
-    if (weatherTimer <= 0.f) {
-        raining = (rand() % 100) < 35; // ~35% шанс дождя
-        weatherTimer = 30.f + rand() % 30;
-        if (raining) sounds.startRain();
-        else         sounds.stopRain();
-    }
-
-    // Капли дождя падают вниз (и чуть вбок), при уходе вниз — заново сверху
-    if (raining) {
-        for (auto& d : rainDrops) {
-            d.y += d.speed * deltaTime;
-            d.x += 60.f * deltaTime; // наклон дождя ветром
-            if (d.y > 600.f) { d.y = -10.f; d.x = (float)(rand() % 900) - 50.f; }
-            if (d.x > 820.f) d.x -= 870.f;
-        }
-    }
-}
-
-void Game::drawClouds() {
-    sf::View uiView(sf::FloatRect({0.f, 0.f}, {800.f, 600.f}));
-    window.setView(uiView);
-
-    float brightness = getBrightness();
-    std::uint8_t base = (std::uint8_t)(215 + 40 * brightness);
-    std::uint8_t alpha = raining ? 245 : 205;
-    sf::Color body(base, base, (std::uint8_t)std::min(255, base + 8), alpha);
-    sf::Color shade((std::uint8_t)(base - 45), (std::uint8_t)(base - 45), (std::uint8_t)(base - 32), alpha);
-
-    // Пиксельное облако: карта 10x5 «пикселей». 1 = тело, 2 = тень (нижняя кромка), 0 = пусто.
-    // Края намеренно рваные/ступенчатые для пиксель-арт вида.
-    const int CW = 10, CH = 5;
-    const float U = 11.f; // размер одного «пикселя» облака
-    int map[CH][CW] = {
-        {0,0,1,1,0,0,1,1,0,0},
-        {0,1,1,1,1,1,1,1,1,0},
-        {1,1,1,1,1,1,1,1,1,1},
-        {1,1,1,1,1,1,1,1,1,1},
-        {0,2,2,0,2,2,0,2,2,0},
-    };
-
-    for (const auto& c : cloudPositions) {
-        for (int ry = 0; ry < CH; ry++) {
-            for (int rx = 0; rx < CW; rx++) {
-                int v = map[ry][rx];
-                if (v == 0) continue;
-                sf::RectangleShape px({U + 0.5f, U + 0.5f});
-                px.setPosition({c.x + rx * U, c.y + ry * U});
-                px.setFillColor(v == 2 ? shade : body);
-                window.draw(px);
-            }
-        }
-    }
-
-    window.setView(camera);
-}
-
-void Game::drawRain() {
-    if (!raining) return;
-
-    // Для обрезки капель по земле нужно знать, где поверхность в каждой экранной колонке.
-    // Переводим экранную X в мировую, находим верхний твёрдый блок, переводим его Y обратно в экран.
-    sf::Vector2f viewCenter = camera.getCenter();
-    sf::Vector2f viewSize   = camera.getSize();
-    float viewLeft = viewCenter.x - viewSize.x / 2.f;
-    float viewTop  = viewCenter.y - viewSize.y / 2.f;
-    // Коэффициенты перевода "мир -> экран(800x600)"
-    float sx = 800.f / viewSize.x;
-    float sy = 600.f / viewSize.y;
-
-    auto groundScreenY = [&](float screenX) -> float {
-        // экран -> мир
-        float worldX = viewLeft + (screenX / 800.f) * viewSize.x;
-        int bx = (int)(worldX / BLOCK_SIZE);
-        if (!world.inBounds(bx, 0)) return 600.f;
-        // ищем первый твёрдый блок сверху вниз в этой колонке
-        int startBY = std::max(0, (int)(viewTop / BLOCK_SIZE));
-        for (int by = startBY; by < WORLD_HEIGHT; by++) {
-            const Block& b = world.getBlock(bx, by);
-            // Дождь протекает сквозь кроны деревьев (листва) и стволы — они не считаются "землёй"
-            if (b.type == BlockType::LEAVES || b.type == BlockType::WOOD) continue;
-            if (b.isSolid()) {
-                float worldY = by * (float)BLOCK_SIZE;
-                return (worldY - viewTop) * sy; // мир -> экран
-            }
-        }
-        return 600.f; // земли нет — капля падает до низа экрана
-    };
-
-    sf::View uiView(sf::FloatRect({0.f, 0.f}, {800.f, 600.f}));
-    window.setView(uiView);
-
-    sf::VertexArray lines(sf::PrimitiveType::Lines, rainDrops.size() * 2);
-    std::size_t vi = 0;
-    for (size_t i = 0; i < rainDrops.size(); i++) {
-        const auto& d = rainDrops[i];
-        float limit = groundScreenY(d.x); // до какой Y можно рисовать каплю
-        if (d.y >= limit) continue;        // капля уже "под землёй" — не рисуем
-
-        float tailY = d.y + 24.f;
-        if (tailY > limit) tailY = limit;  // хвост капли обрезаем по поверхности
-        float tailX = d.x - 6.f * ((tailY - d.y) / 24.f);
-
-        lines[vi].position     = {d.x, d.y};
-        lines[vi].color        = sf::Color(170, 200, 245, 200);
-        vi++;
-        lines[vi].position     = {tailX, tailY};
-        lines[vi].color        = sf::Color(150, 185, 235, 120);
-        vi++;
-    }
-    lines.resize(vi); // оставляем только реально нарисованные вершины
-    window.draw(lines);
-
-    window.setView(camera);
-}
-
-void Game::drawSky() {
-    // Небо — плавный вертикальный градиент через один квад (интерполяция цвета по вершинам),
-    // вместо полос это даёт по-настоящему гладкий переход без ступенек.
-    sf::View uiView(sf::FloatRect({0.f, 0.f}, {800.f, 600.f}));
-    window.setView(uiView);
-
-    float brightness = getBrightness();
-
-    auto lerpColor = [](sf::Color a, sf::Color b, float t) {
-        return sf::Color(
-            (std::uint8_t)(a.r + (b.r - a.r) * t),
-            (std::uint8_t)(a.g + (b.g - a.g) * t),
-            (std::uint8_t)(a.b + (b.b - a.b) * t));
-    };
-
-    sf::Color dayTop(100, 165, 225),   dayBottom(195, 215, 235);
-    sf::Color nightTop(8, 8, 32),      nightBottom(40, 32, 62);
-
-    sf::Color topColor    = lerpColor(nightTop, dayTop, brightness);
-    sf::Color bottomColor = lerpColor(nightBottom, dayBottom, brightness);
-
-    sf::VertexArray gradient(sf::PrimitiveType::TriangleStrip, 4);
-    gradient[0].position = {0.f, 0.f};     gradient[0].color = topColor;
-    gradient[1].position = {800.f, 0.f};   gradient[1].color = topColor;
-    gradient[2].position = {0.f, 600.f};   gradient[2].color = bottomColor;
-    gradient[3].position = {800.f, 600.f}; gradient[3].color = bottomColor;
-    window.draw(gradient);
-
-    // Солнце и луна двигаются по окружности с постоянной угловой скоростью.
-    // Важно: радиус по X и по Y должен быть ОДИНАКОВЫМ — иначе (даже со сдвигом фаз)
-    // скорость на дуге всё равно будет неравномерной, "зависая" то на восходе/закате,
-    // то в зените. Заодно радиус поменьше держит светила ближе к центру, а не у самых краёв.
-    float angle      = (dayTime / DAY_LENGTH) * 2.f * 3.14159265f;
-    float R          = 190.f;
-    float sunX       = 400.f - std::sin(angle) * R;
-    float sunY       = 290.f + std::cos(angle) * R;
-    float moonAngle  = angle + 3.14159265f;
-    float moonX      = 400.f - std::sin(moonAngle) * R;
-    float moonY      = 290.f + std::cos(moonAngle) * R;
-    float moonBright = 1.f - brightness;
-
-    sf::RenderStates addStates;
-    addStates.blendMode = sf::BlendAdd;
-
-    auto drawGlowDisc = [&](float cx, float cy, float strength, sf::Color core, sf::Color glow) {
-        if (strength <= 0.02f) return;
-        float radius = 100.f; // насколько далеко расходится свечение солнца/луны
-        sf::Sprite glowSprite(glowTexture);
-        glowSprite.setOrigin({128.f, 128.f});
-        float scale = radius / 128.f;
-        glowSprite.setScale({scale, scale});
-        glowSprite.setPosition({cx, cy});
-        glowSprite.setColor(sf::Color(glow.r, glow.g, glow.b, (std::uint8_t)(190.f * strength)));
-        window.draw(glowSprite, addStates);
-
-        // Квадратное, чуть "пиксельное" солнце/луна — как в оригинале, не гладкий круг
-        float discSize = 30.f;
-        sf::RectangleShape disc({discSize, discSize});
-        disc.setOrigin({discSize / 2.f, discSize / 2.f});
-        disc.setPosition({cx, cy});
-        disc.setFillColor(core);
-        window.draw(disc);
-
-        // Небольшая внутренняя рамка чуть темнее — намёк на пиксельную текстуру, а не заливку
-        sf::Color shade(
-            (std::uint8_t)(core.r * 0.85f),
-            (std::uint8_t)(core.g * 0.85f),
-            (std::uint8_t)(core.b * 0.85f));
-        float innerSize = discSize - 8.f;
-        sf::RectangleShape inner({innerSize, innerSize});
-        inner.setOrigin({innerSize / 2.f, innerSize / 2.f});
-        inner.setPosition({cx, cy});
-        inner.setFillColor(shade);
-        window.draw(inner);
-    };
-
-    drawGlowDisc(sunX, sunY, brightness, sf::Color(255, 250, 210), sf::Color(255, 225, 120));
-    drawGlowDisc(moonX, moonY, moonBright * 0.8f, sf::Color(225, 230, 245), sf::Color(175, 195, 235));
-
-    // Звёзды — мягко мерцают, а не просто статично включены/выключены
-    if (brightness < 0.55f) {
-        float starVisibility = (0.55f - brightness) / 0.55f;
-        sf::CircleShape star(1.3f);
-        star.setOrigin({1.3f, 1.3f});
-        for (size_t i = 0; i < starPositions.size(); i++) {
-            float twinkle = 0.6f + 0.4f * std::sin(animTime * 1.5f + (float)i * 0.9f);
-            std::uint8_t a = (std::uint8_t)(220.f * starVisibility * twinkle);
-            star.setPosition(starPositions[i]);
-            star.setFillColor(sf::Color(255, 255, 255, a));
-            window.draw(star);
-        }
-    }
-
-    window.setView(camera);
-}
 
 void Game::render() {
     window.clear(sf::Color(100, 160, 220));
