@@ -11,6 +11,7 @@
 #include "Particle.hpp"
 #include "Chicken.hpp"
 #include "Cow.hpp"
+#include "Sheep.hpp"
 #include "Enemy.hpp"
 
 class Game {
@@ -57,6 +58,7 @@ private:
     sf::Texture blockTexture; // атлас текстур блоков (textures/blocks.png)
     sf::Texture glowTexture;  // процедурный мягкий радиальный градиент — для солнца/луны/факелов/печи,
                               // без колец: одна текстура с плавным затуханием альфы к краям
+    sf::Texture sakuraLeafTexture; // тайл листвы, перекрашенный в малиновый с сохранением тёмных "дырок"
 
     std::vector<Particle> particles;
     void spawnBreakParticles(int bx, int by, const Block& block);
@@ -95,6 +97,10 @@ private:
     void spawnCow();                     // ищет случайное место на поверхности и добавляет корову
     void killCow(size_t index);          // "добыча" коровы: частицы + сырая говядина + удаление
 
+    std::vector<Sheep> sheep;
+    void spawnSheep();                   // ищет случайное место на поверхности и добавляет овцу
+    void killSheep(size_t index);        // "добыча" овцы: частицы + шерсть + удаление
+
     std::vector<Enemy> enemies;
     void spawnEnemy();                   // спавнит врага на поверхности подальше от игрока
     void killEnemy(size_t index);        // смерть врага: частицы + удаление
@@ -111,7 +117,15 @@ private:
     static constexpr int MAX_COWS = 4;
     static constexpr int BEEF_PER_COW = 1; // сколько сырой говядины выпадает с одной коровы
 
+    float sheepRespawnTimer = 0.f;        // через сколько секунд появится следующая овца (если их мало)
+    static constexpr int MAX_SHEEP = 6; // было 4 — маловато
+    static constexpr int WOOL_PER_SHEEP = 3; // сколько шерсти выпадает с одной овцы (для быстрого крафта кровати)
+
     float petalTimer = 0.f; // таймер падающих лепестков сакуры (только в биоме сакуры рядом с игроком)
+
+    // === Сон ===
+    static constexpr float SLEEP_DURATION = 2.5f; // сколько секунд игрок лежит в кровати перед рассветом
+    float sleepTimer = 0.f;
     float snowTimer = 0.f;  // таймер падающего снега (только в снежном биоме рядом с игроком)
 
     // Заложенный и подожжённый TNT — ждёт взрыва

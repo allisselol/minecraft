@@ -46,6 +46,9 @@ public:
         load("step_snow1",  "sounds/step_snow1.wav");
         load("step_snow2",  "sounds/step_snow2.wav");
         load("step_snow3",  "sounds/step_snow3.wav");
+        load("sheep_say1", "sounds/sheep_say1.ogg");
+        load("sheep_say2", "sounds/sheep_say2.ogg");
+        load("sheep_say3", "sounds/sheep_say3.ogg");
         load("fuse",   "sounds/fuse.wav");        // шипение факела/фитиля
         load("splash", "sounds/splash_weak.wav"); // плеск воды
         load("hurt1",  "sounds/hurt1.ogg");        // звук гибели курицы
@@ -124,6 +127,7 @@ public:
                 play("dig_grass" + std::to_string(r)); break;
             case BlockType::STONE:
             case BlockType::GRAVEL:
+            case BlockType::GLOWING_MOSS:
             case BlockType::COAL_ORE:
             case BlockType::IRON_ORE:
             case BlockType::GOLD_ORE:
@@ -149,6 +153,8 @@ public:
             case BlockType::DOOR_OPEN:
             case BlockType::DOOR_TOP:
             case BlockType::DOOR_TOP_OPEN:
+            case BlockType::BED:
+            case BlockType::BED_HEAD:
                 play("dig_wood" + std::to_string(r)); break;
             default: break;
         }
@@ -171,6 +177,7 @@ public:
         }
     }
     void playSnowStep() { play("step_snow" + std::to_string(rand() % 3 + 1)); } // шаги по снегу в снежном биоме
+    void playSheepSound() { play("sheep_say" + std::to_string(rand() % 3 + 1)); } // блеяние овцы (гибель и на слух)
 
     void playFuse()   { play("fuse"); }    // звук факела / поджига TNT
     void playSplash() { play("splash"); }  // звук воды

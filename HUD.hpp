@@ -13,8 +13,18 @@ private:
     float starveTimer = 0.f;
     float regenTimer  = 0.f;
 
-    // Единая полоса внизу: 20px (сердечки) + 56px (хотбар) = 76px
-    static constexpr float PANEL_H = 76.f;
+    // Единая полоса внизу: сердечки/еда над хотбаром + сам хотбар.
+    // Ширина панели теперь равна ширине хотбара (9 слотов), а не всему экрану —
+    // раньше фон растягивался на весь низ экрана, а сердечки/еда торчали по краям.
+    static constexpr int   HOTBAR_SLOTS    = 9;
+    static constexpr float HOTBAR_SLOT_SZ  = 50.f;
+    static constexpr float HOTBAR_GAP      = 2.f;
+    static constexpr float HOTBAR_W = HOTBAR_SLOTS * HOTBAR_SLOT_SZ + (HOTBAR_SLOTS - 1) * HOTBAR_GAP;
+    static constexpr float PANEL_PAD_X = 14.f; // небольшой отступ фона по бокам от хотбара
+    static constexpr float PANEL_W = HOTBAR_W + PANEL_PAD_X * 2.f;
+    static constexpr float PANEL_X = (800.f - PANEL_W) / 2.f;
+
+    static constexpr float PANEL_H = 76.f; // 20px (сердечки/еда) + 56px (хотбар)
     static constexpr float PANEL_Y = 600.f - PANEL_H;
 
     void drawHeart(sf::RenderWindow& window, float x, float y, bool full) {
@@ -117,15 +127,15 @@ public:
         sf::View prev = window.getView();
         window.setView(ui);
 
-        // Сплошная тёмная полоса до самого низа
-        sf::RectangleShape bg({800.f, PANEL_H});
-        bg.setPosition({0.f, PANEL_Y});
+        // Тёмная полоса шириной с хотбар (не на весь экран), по центру снизу
+        sf::RectangleShape bg({PANEL_W, PANEL_H});
+        bg.setPosition({PANEL_X, PANEL_Y});
         bg.setFillColor(sf::Color(35, 35, 35, 245));
         window.draw(bg);
 
         // Тонкая светлая линия сверху полосы
-        sf::RectangleShape line({800.f, 1.f});
-        line.setPosition({0.f, PANEL_Y});
+        sf::RectangleShape line({PANEL_W, 1.f});
+        line.setPosition({PANEL_X, PANEL_Y});
         line.setFillColor(sf::Color(90, 90, 90));
         window.draw(line);
 
@@ -140,13 +150,13 @@ public:
 
         float rowY = PANEL_Y + 4.f;
 
-        // Сердечки слева, компактно
+        // Сердечки — у левого края узкой панели (над хотбаром, не у края экрана)
         for (int i = 0; i < maxHealth; i++)
-            drawHeart(window, 12.f + i * 15.f, rowY, i < health);
+            drawHeart(window, PANEL_X + 8.f + i * 15.f, rowY, i < health);
 
-        // Еда справа, компактно
+        // Еда — у правого края той же панели
         for (int i = 0; i < maxFood; i++)
-            drawFood(window, 800.f - 12.f - (maxFood - i) * 14.f, rowY, i < food);
+            drawFood(window, PANEL_X + PANEL_W - 8.f - (maxFood - i) * 14.f, rowY, i < food);
 
         window.setView(prev);
     }

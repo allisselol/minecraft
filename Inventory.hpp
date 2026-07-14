@@ -35,6 +35,7 @@ private:
     int selectedSlot;
 
     const sf::Texture* blockTexture = nullptr; // атлас текстур блoков (для иконок)
+    const sf::Texture* sakuraLeafTexture = nullptr; // отдельный перекрашенный тайл листвы сакуры
 
     std::vector<Recipe> recipes;
     std::vector<sf::FloatRect> recipeHitboxes; // пересчитываются при каждой отрисовке крафта
@@ -96,6 +97,7 @@ public:
     Inventory();
 
     void setBlockTexture(const sf::Texture* tex) { blockTexture = tex; }
+    void setSakuraLeafTexture(const sf::Texture* tex) { sakuraLeafTexture = tex; }
 
     void selectSlot(int index);
     void nextSlot();

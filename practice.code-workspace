@@ -1,24 +1,7 @@
 {
-	"folders": [
-		{
-			"name": "practice",
-			"path": "../practice"
-		},
-		{
-			"name": "animal",
-			"path": "../animal"
-		},
-		{
-			"name": "files",
-			"path": "../files"
-		},
-		{
-			"name": "minecraft 2",
-			"path": "."
-		},
-		{
-			"path": "../minecraft-2d-sfml-master"
-		}
-	],
-	"settings": {}
+    "folders": [
+        {
+            "path": "."
+        }
+    ]
 }

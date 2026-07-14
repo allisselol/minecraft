@@ -80,6 +80,21 @@ Inventory::Inventory() : selectedSlot(0) {
 
     // Лестница — рецепт простой (не требует верстака), пачкой по 3, как в оригинале
     recipes.push_back({ {{BlockType::PLANKS, 2}}, BlockType::LADDER, 3 });
+    {
+        // Кровать — теперь на верстаке: 3 шерсти сверху, 3 доски снизу, как в оригинале
+        ShapedRecipe bed{};
+        BlockType pattern[3][3] = {
+            { BlockType::WOOL,   BlockType::WOOL,   BlockType::WOOL },
+            { BlockType::PLANKS, BlockType::PLANKS, BlockType::PLANKS },
+            { BlockType::AIR,    BlockType::AIR,    BlockType::AIR },
+        };
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+                bed.pattern[r][c] = pattern[r][c];
+        bed.result = BlockType::BED;
+        bed.resultCount = 1;
+        shapedRecipes.push_back(bed);
+    }
 }
 
 void Inventory::selectSlot(int index) {
@@ -897,6 +912,52 @@ void Inventory::drawIcon(sf::RenderWindow& window, BlockType type, float sx, flo
         return;
     }
 
+    // Кровать — рисуем процедурно, вид сбоку: красное одеяло, белая подушка, деревянные ножки
+    if (type == BlockType::BED || type == BlockType::BED_HEAD) {
+        sf::Color blanket(190, 45, 45);
+        sf::Color pillow(235, 235, 240);
+        sf::Color legs(90, 65, 35);
+
+        sf::RectangleShape bedTop({size * 0.9f, size * 0.32f});
+        bedTop.setPosition({sx + size * 0.05f, sy + size * 0.42f});
+        bedTop.setFillColor(blanket);
+        window.draw(bedTop);
+
+        sf::RectangleShape pillowShape({size * 0.28f, size * 0.24f});
+        pillowShape.setPosition({sx + size * 0.08f, sy + size * 0.38f});
+        pillowShape.setFillColor(pillow);
+        window.draw(pillowShape);
+
+        sf::RectangleShape leg1({size * 0.08f, size * 0.16f});
+        leg1.setPosition({sx + size * 0.08f, sy + size * 0.74f});
+        leg1.setFillColor(legs);
+        window.draw(leg1);
+        sf::RectangleShape leg2({size * 0.08f, size * 0.16f});
+        leg2.setPosition({sx + size * 0.84f, sy + size * 0.74f});
+        leg2.setFillColor(legs);
+        window.draw(leg2);
+        return;
+    }
+
+    // Шерсть — рисуем процедурно: пушистый белый комок с лёгкой рябью
+    if (type == BlockType::WOOL) {
+        sf::Color wool(240, 240, 235);
+        sf::Color shade(210, 210, 203);
+        sf::RectangleShape base({size * 0.8f, size * 0.8f});
+        base.setPosition({sx + size * 0.1f, sy + size * 0.1f});
+        base.setFillColor(wool);
+        window.draw(base);
+        for (int i = 0; i < 4; i++) {
+            sf::RectangleShape dot({size * 0.14f, size * 0.14f});
+            float dx = (i % 2 == 0) ? size * 0.2f : size * 0.55f;
+            float dy = (i < 2) ? size * 0.22f : size * 0.55f;
+            dot.setPosition({sx + dx, sy + dy});
+            dot.setFillColor(shade);
+            window.draw(dot);
+        }
+        return;
+    }
+
     // Слитки железа/золота — рисуем процедурно: трапециевидный брусок
     if (type == BlockType::IRON_INGOT || type == BlockType::GOLD_INGOT) {
         bool gold = (type == BlockType::GOLD_INGOT);
@@ -923,6 +984,16 @@ void Inventory::drawIcon(sf::RenderWindow& window, BlockType type, float sx, flo
         return;
     }
 
+    // Сакура — честная перекраска (своя текстура), рисуем её раньше проверки общего атласа
+    if (type == BlockType::LEAVES_SAKURA && sakuraLeafTexture) {
+        sf::Sprite icon(*sakuraLeafTexture);
+        float scale = size / (float)Block::TEXTURE_SIZE;
+        icon.setScale({scale, scale});
+        icon.setPosition({sx, sy});
+        window.draw(icon);
+        return;
+    }
+
     // Если атлас доступен — рисуем реальную текстуру блока (как в мире)
     if (blockTexture) {
         sf::Sprite icon(*blockTexture);
@@ -932,8 +1003,8 @@ void Inventory::drawIcon(sf::RenderWindow& window, BlockType type, float sx, flo
         icon.setPosition({sx, sy});
         if (type == BlockType::WATER) icon.setColor(sf::Color(255, 255, 255, 200));
         window.draw(icon);
-        // Акация/сакура — тон поверх (умножение на тёмно-зелёном только темнит, не розовеет)
-        if (type == BlockType::LEAVES_ACACIA || type == BlockType::LEAVES_SAKURA) {
+        // Акация — тон поверх (умножение на тёмно-зелёном только темнит, не желтит)
+        if (type == BlockType::LEAVES_ACACIA) {
             sf::Color t = Block(type).getLeafTint();
             sf::RectangleShape overlay({size, size});
             overlay.setPosition({sx, sy});

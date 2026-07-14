@@ -170,6 +170,62 @@ void Player::resolveCollisions(const World& world) {
 }
 
 void Player::draw(sf::RenderWindow& window) {
+    if (sleeping) {
+        // Лежит ровно на кровати: x,y — верхний левый угол клетки-изножья (см. startSleep),
+        // а вся поза рисуется в системе координат самой кровати (2 клетки в ширину,
+        // 1 клетка в высоту), а не через обычные width/height игрока (те — для стойки).
+        float bedW = BLOCK_SIZE * 2.f;
+        float bedH = (float)BLOCK_SIZE;
+        float ps  = bedW / 16.f; // сетка 16x8 поверх кровати
+        float psy = bedH / 8.f;
+
+        auto rect = [&](float col, float row, float wc, float hr, sf::Color c) {
+            sf::RectangleShape p({ps * wc + 0.5f, psy * hr + 0.5f});
+            p.setPosition({x + col * ps, y + row * psy});
+            p.setFillColor(c);
+            window.draw(p);
+        };
+
+        sf::Color skin(214, 172, 126);
+        sf::Color skinD(190, 148, 104);
+        sf::Color hair(74, 46, 22);
+        sf::Color eyeB(94, 70, 170);
+        sf::Color shirt(38, 158, 150);
+        sf::Color shirtD(28, 130, 122);
+        sf::Color pants(60, 66, 150);
+        sf::Color pantsD(46, 50, 120);
+        sf::Color boot(66, 66, 74);
+
+        // Фигура заметно меньше самой кровати — снизу/сверху и по бокам должно быть
+        // видно её собственную текстуру (красное одеяло, серую подушку), а не только Стива.
+        // Ботинки и ноги со стороны изножья (слева)
+        rect(1.f, 3.4f, 2.f, 2.6f, boot);
+        rect(3.f, 3.f, 3.6f, 3.2f, pants);
+        rect(3.f, 6.f, 3.6f, 0.5f, pantsD);   // тень снизу штанин
+
+        // Туловище (рубашка) — встык с ногами
+        rect(6.6f, 2.3f, 4.3f, 4.f, shirt);
+        rect(6.6f, 6.1f, 4.3f, 0.5f, shirtD); // тень снизу рубашки
+        rect(6.6f, 2.3f, 4.3f, 0.4f, sf::Color(52, 178, 168)); // блик сверху
+
+        // Шея
+        rect(10.9f, 3.f, 0.7f, 2.3f, skinD);
+
+        // Голова со стороны подушки (справа, там же, где подушка кровати) — лежит на
+        // спине, лицо смотрит вверх на игрока, черты видны прямо на лице
+        rect(11.6f, 1.9f, 3.6f, 4.9f, skin);            // лицо
+        rect(11.6f, 1.9f, 3.6f, 1.2f, hair);            // волосы надо лбом
+        rect(11.35f, 2.8f, 0.45f, 3.2f, hair);          // прядь у подушки (дальний край)
+        rect(15.15f, 2.8f, 0.45f, 3.2f, hair);          // прядь с ближнего края
+        rect(11.6f, 6.2f, 3.6f, 0.6f, skinD);           // подбородок/тень снизу лица
+
+        // Закрытые глаза — спит, смотрит вверх
+        rect(12.5f, 3.9f, 1.1f, 0.4f, eyeB);
+        rect(14.f,  3.9f, 1.1f, 0.4f, eyeB);
+
+        return;
+    }
+
     // Приземистый Стив: крупная голова, короткое широкое тело, короткие ноги.
     // Сетка 16 (шир.) x 24 (выс.) суб-пикселей.
     float ps  = width  / 16.f;

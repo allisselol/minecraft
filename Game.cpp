@@ -88,6 +88,44 @@ Game::Game()
         glowTexture.setSmooth(true); // билинейная интерполяция при растяжении — никаких резких краёв
     }
 
+    // Малиновая листва сакуры — честная перекраска тайла обычной листвы, а не полупрозрачный
+    // слой поверх (тот способ размывал контраст между "листиками" и тёмными "дырками").
+    // Берём исходные пиксели тайла: тёмные (дырки) оставляем тёмными, яркие (листики)
+    // перекрашиваем в малиновый с той же относительной яркостью — рисунок сохраняется, меняется тон.
+    {
+        sf::Image atlasImg;
+        if (atlasImg.loadFromFile("textures/blocks.png")) {
+            const unsigned int TS = (unsigned int)Block::TEXTURE_SIZE;
+            const unsigned int LEAF_INDEX = 4; // индекс тайла обычной листвы в атласе
+            sf::Image leafImg;
+            leafImg.resize({TS, TS}, sf::Color::Black);
+            sf::Color raspberry(240, 140, 195); // нежный светло-розовый — целевой цвет "листиков"
+
+            for (unsigned int py = 0; py < TS; py++) {
+                for (unsigned int px = 0; px < TS; px++) {
+                    sf::Color src = atlasImg.getPixel({LEAF_INDEX * TS + px, py});
+                    int lum = src.r + src.g + src.b;
+                    if (lum < 60) {
+                        leafImg.setPixel({px, py}, sf::Color::Black); // тёмная "дырка" — оставляем как есть
+                    } else {
+                        // Яркость пикселя листика (зелёный канал доминирует в исходной текстуре)
+                        float t = std::clamp((src.g - 100.f) / (245.f - 100.f), 0.55f, 1.f);
+                        leafImg.setPixel({px, py}, sf::Color(
+                            (std::uint8_t)(raspberry.r * t),
+                            (std::uint8_t)(raspberry.g * t),
+                            (std::uint8_t)(raspberry.b * t)));
+                    }
+                }
+            }
+            if (!sakuraLeafTexture.loadFromImage(leafImg)) {
+                std::cerr << "Failed to generate sakura leaf texture" << std::endl;
+            }
+        } else {
+            std::cerr << "Failed to reload textures/blocks.png for sakura recolor" << std::endl;
+        }
+    }
+    inventory.setSakuraLeafTexture(&sakuraLeafTexture);
+
     // Спавним несколько цыплят на поверхности в случайных местах мира
     for (int i = 0; i < MAX_CHICKENS; i++)
         spawnChicken();
@@ -97,6 +135,11 @@ Game::Game()
     for (int i = 0; i < MAX_COWS; i++)
         spawnCow();
     cowRespawnTimer = 20.f + rand() % 15;
+
+    // И овец
+    for (int i = 0; i < MAX_SHEEP; i++)
+        spawnSheep();
+    sheepRespawnTimer = 20.f + rand() % 15;
 }
 
 int Game::findGroundSurface(int bx) const {
@@ -184,6 +227,44 @@ void Game::killCow(size_t index) {
     inventory.addItem(BlockType::RAW_BEEF, BEEF_PER_COW); // сырая говядина — есть сырой или приготовить в печи
 
     cows.erase(cows.begin() + index);
+}
+
+void Game::spawnSheep() {
+    int bx = 5 + rand() % (WORLD_WIDTH - 10);
+    int surfaceY = findGroundSurface(bx);
+    float spawnPx = bx * (float)BLOCK_SIZE;
+    float spawnPy = (surfaceY - 2) * (float)BLOCK_SIZE; // как у коровы — овца крупнее курицы, нужен запас
+    sheep.emplace_back(spawnPx, spawnPy);
+}
+
+void Game::killSheep(size_t index) {
+    float cx = sheep[index].getX() + sheep[index].getWidth()  / 2.f;
+    float cy = sheep[index].getY() + sheep[index].getHeight() / 2.f;
+
+    // Клочки шерсти разлетаются при добыче
+    static std::mt19937 rng(std::random_device{}());
+    std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f);
+    std::uniform_real_distribution<float> speedDist(50.f, 140.f);
+    std::uniform_real_distribution<float> lifeDist(0.35f, 0.6f);
+    sf::Color woolColor(240, 240, 235);
+
+    for (int i = 0; i < 8; i++) {
+        Particle p;
+        float angle = angleDist(rng);
+        float speed = speedDist(rng);
+        p.position    = {cx, cy};
+        p.velocity    = {std::cos(angle) * speed, std::sin(angle) * speed - 80.f};
+        p.color       = woolColor;
+        p.size        = 3.f + (float)(rand() % 3);
+        p.maxLifetime = lifeDist(rng);
+        p.lifetime    = p.maxLifetime;
+        particles.push_back(p);
+    }
+
+    sounds.playSheepSound(); // блеяние овцы
+    inventory.addItem(BlockType::WOOL, WOOL_PER_SHEEP); // шерсть — на кровать
+
+    sheep.erase(sheep.begin() + index);
 }
 
 void Game::spawnEnemy() {
@@ -314,7 +395,7 @@ void Game::handleEvents() {
             if (kp->code == sf::Keyboard::Key::Num4) inventory.selectSlot(3);
             if (kp->code == sf::Keyboard::Key::Num5) inventory.selectSlot(4);
 
-            if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
+            if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen && !player.isSleeping()) {
                 if (kp->code == sf::Keyboard::Key::A ||
                     kp->code == sf::Keyboard::Key::D ||
                     kp->code == sf::Keyboard::Key::W ||
@@ -328,6 +409,7 @@ void Game::handleEvents() {
             player.handleKeyReleased(kr->code);
 
         if (const auto* mb = event->getIf<sf::Event::MouseButtonPressed>()) {
+          if (!player.isSleeping()) {
             if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
                 handleBlockInteraction(mb->button, sf::Vector2i(mb->position.x, mb->position.y));
             } else {
@@ -379,6 +461,7 @@ void Game::handleEvents() {
                     sounds.playClick(); // подтверждение крафта
                 }
             }
+          }
         }
     }
 }
@@ -648,6 +731,18 @@ void Game::explodeAt(int bx, int by) {
         }
     }
 
+    for (auto& s : sheep) {
+        float dxc = s.getX() - cx;
+        float dyc = s.getY() - cy;
+        float distC = std::sqrt(dxc * dxc + dyc * dyc) / BLOCK_SIZE;
+        if (distC < DAMAGE_RADIUS) {
+            float lenC = std::max(1.f, std::sqrt(dxc * dxc + dyc * dyc));
+            float tC = std::max(0.f, 1.f - distC / DAMAGE_RADIUS);
+            float forceC = 250.f + 400.f * tC;
+            s.applyKnockback((dxc / lenC) * forceC, -220.f - 250.f * tC);
+        }
+    }
+
     // Урон и отдача врагам в радиусе взрыва
     for (auto& e : enemies) {
         float dxe = e.getX() - cx;
@@ -725,6 +820,21 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
                 return;
             }
         }
+
+        // И не по овце ли (тоже добыча)
+        for (size_t i = 0; i < sheep.size(); i++) {
+            sf::FloatRect bounds(
+                {sheep[i].getX(), sheep[i].getY()},
+                {sheep[i].getWidth(), sheep[i].getHeight()});
+            if (bounds.contains(worldPos)) {
+                int cbx = (int)(sheep[i].getX() / BLOCK_SIZE);
+                int cby = (int)(sheep[i].getY() / BLOCK_SIZE);
+                if (isWithinReach(cbx, cby)) {
+                    killSheep(i);
+                }
+                return;
+            }
+        }
     }
 
     int bx = (int)(worldPos.x / BLOCK_SIZE);
@@ -749,6 +859,16 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
                 world.setBlock(bx, bottomY, BlockType::AIR);
                 world.setBlock(bx, topY,    BlockType::AIR);
                 inventory.addItem(BlockType::DOOR, 1); // только 1 дверь за обе половинки
+            } else if (block.isBedPart()) {
+                // Кровать целиком в 2 клетки по горизонтали — тоже ломаем обе половинки разом
+                sounds.playDig(BlockType::WOOD);
+                spawnBreakParticles(bx, by, block);
+                bool isHead = (block.type == BlockType::BED_HEAD);
+                int footX = isHead ? bx - 1 : bx;
+                int headX = isHead ? bx     : bx + 1;
+                world.setBlock(footX, by, BlockType::AIR);
+                world.setBlock(headX, by, BlockType::AIR);
+                inventory.addItem(BlockType::BED, 1); // только 1 кровать за обе половинки
             } else {
                 sounds.playDig(block.type);
                 spawnBreakParticles(bx, by, block);
@@ -813,6 +933,24 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
             return;
         }
 
+        if (clicked.isBedPart()) {
+            // Кровать занимает 2 клетки по горизонтали — находим изножье (для точки спавна и позы)
+            bool isHead = (clicked.type == BlockType::BED_HEAD);
+            int footX = isHead ? bx - 1 : bx;
+
+            // Ложимся спать, только если сейчас реально ночь — просто поставить кровать
+            // или ткнуть её днём для этого недостаточно. Ночь пройдёт не сразу, а через
+            // несколько секунд "сна", и точка возрождения переносится в этот момент.
+            if (!player.isSleeping() && getBrightness() < 0.3f) {
+                spawnX = footX * (float)BLOCK_SIZE;
+                spawnY = (by - 2) * (float)BLOCK_SIZE;
+                player.startSleep(footX * (float)BLOCK_SIZE, by * (float)BLOCK_SIZE);
+                sleepTimer = SLEEP_DURATION;
+                sounds.playClick(); // временный звук — своего "укладывания в кровать" пока нет
+            }
+            return;
+        }
+
         // Открытие контейнеров — в приоритете. Если клик пришёлся не по ним, но в руке
         // еда — едим её вместо попытки "поставить" как блок (есть можно, глядя куда угодно).
         if (inventory.hasSelected()) {
@@ -845,6 +983,17 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
                 return;
             }
 
+            if (t == BlockType::BED) {
+                // Кровать шириной в 2 клетки: изножье — там, куда кликнули, изголовье — клетка справа.
+                if (world.inBounds(bx + 1, by) && !world.getBlock(bx + 1, by).isSolid()) {
+                    world.setBlock(bx, by, BlockType::BED);
+                    world.setBlock(bx + 1, by, BlockType::BED_HEAD);
+                    sounds.playDig(BlockType::WOOD);
+                    inventory.consumeSelected();
+                }
+                return;
+            }
+
             if (t == BlockType::TORCH)      sounds.playFuse();   // потрескивание факела
             else if (t == BlockType::WATER) sounds.playSplash(); // плеск при установке воды
             else                            sounds.playDig(t);
@@ -855,9 +1004,18 @@ void Game::handleBlockInteraction(sf::Mouse::Button button, sf::Vector2i mousePi
 }
 
 void Game::update(float deltaTime) {
-    if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen) {
+    if (!inventoryOpen && !chestOpen && !workbenchOpen && !furnaceOpen && !player.isSleeping()) {
         player.update(deltaTime, world);
         if (player.didJustEnterWater()) sounds.playSplash(); // плеск при входе в воду
+    }
+
+    // Сон — несколько секунд лежим, потом сами встаём и наступает утро
+    if (player.isSleeping()) {
+        sleepTimer -= deltaTime;
+        if (sleepTimer <= 0.f) {
+            player.wakeUp();
+            dayTime = DAY_LENGTH * 0.25f; // то же "утро", с которого стартует новая игра
+        }
     }
 
     updateParticles(deltaTime);
@@ -935,6 +1093,16 @@ void Game::update(float deltaTime) {
         if ((int)cows.size() < MAX_COWS)
             spawnCow();
         cowRespawnTimer = 20.f + rand() % 15;
+    }
+
+    for (auto& s : sheep)
+        s.update(deltaTime, world);
+
+    sheepRespawnTimer -= deltaTime;
+    if (sheepRespawnTimer <= 0.f) {
+        if ((int)sheep.size() < MAX_SHEEP)
+            spawnSheep();
+        sheepRespawnTimer = 20.f + rand() % 15;
     }
 
     // Враги: преследуют игрока, бьют вблизи
@@ -1437,19 +1605,55 @@ void Game::render() {
                 continue;
             }
 
-            tile.setTextureRect(block.getTextureRect());
-            tile.setPosition({px - overlap, py - overlap});
-            window.draw(tile);
+            if (block.isBedPart()) {
+                // Кровать — процедурно, шириной в 2 клетки: тонкая рама снизу + одеяло сверху,
+                // подушка только на изголовье. Рисуется без зазора между половинками.
+                bool isHead = (block.type == BlockType::BED_HEAD);
+                sf::Color frame(90, 65, 35);
+                sf::Color blanket(190, 45, 45);
+                sf::Color pillow(235, 235, 240);
 
-            // Листва акации/сакуры и трава под ними — тон биома кладём ПОВЕРХ полупрозрачным
+                sf::RectangleShape frameShape({(float)BLOCK_SIZE, BLOCK_SIZE * 0.18f});
+                frameShape.setPosition({px, py + BLOCK_SIZE * 0.82f});
+                frameShape.setFillColor(frame);
+                window.draw(frameShape);
+
+                sf::RectangleShape blanketShape({(float)BLOCK_SIZE, BLOCK_SIZE * 0.38f});
+                blanketShape.setPosition({px, py + BLOCK_SIZE * 0.44f});
+                blanketShape.setFillColor(blanket);
+                window.draw(blanketShape);
+
+                if (isHead) {
+                    sf::RectangleShape pillowShape({BLOCK_SIZE * 0.34f, BLOCK_SIZE * 0.3f});
+                    pillowShape.setPosition({px + BLOCK_SIZE * 0.58f, py + BLOCK_SIZE * 0.46f});
+                    pillowShape.setFillColor(pillow);
+                    window.draw(pillowShape);
+                }
+                continue;
+            }
+
+            if (block.type == BlockType::LEAVES_SAKURA) {
+                // Честная перекраска (сохраняет рисунок "листики/дырки"), а не полупрозрачный слой
+                sf::Sprite sakuraTile(sakuraLeafTexture);
+                sakuraTile.setPosition({px - overlap, py - overlap});
+                window.draw(sakuraTile);
+            } else {
+                tile.setTextureRect(block.getTextureRect());
+                tile.setPosition({px - overlap, py - overlap});
+                window.draw(tile);
+            }
+
+            // Листва акации и трава/стволы под биом кладём ПОВЕРХ полупрозрачным
             // прямоугольником, а не через setColor(умножение): умножение на тёмно-зелёной
             // текстуре может только затемнять, а не сдвигать цвет в розовый/жёлтый — отсюда
-            // была грязно-бордовая "трава" вместо розовой.
+            // была грязно-бордовая "трава" вместо розовой. Сакура теперь красится честно (см. выше).
             sf::Color overlayTint = sf::Color::Transparent;
-            if (block.isLeaf() && block.type != BlockType::LEAVES) {
+            if (block.type == BlockType::LEAVES_ACACIA || block.type == BlockType::LEAVES_SNOWY) {
                 overlayTint = block.getLeafTint();
             } else if (block.type == BlockType::WOOD && world.biomeAt(x) == 3) {
                 overlayTint = sf::Color(45, 32, 22); // снежный биом — тёмно-коричневый ствол
+            } else if (block.type == BlockType::GLOWING_MOSS) {
+                overlayTint = sf::Color(60, 200, 110); // светящийся мох — зелёный поверх камня
             }
             // Земля/трава везде обычная — биом виден только по деревьям (и лепесткам сакуры),
             // не по перекрашенной почве.
@@ -1458,6 +1662,11 @@ void Game::render() {
                 overlay.setPosition({px - overlap, py - overlap});
                 overlay.setFillColor(sf::Color(overlayTint.r, overlayTint.g, overlayTint.b, 170));
                 window.draw(overlay);
+            }
+
+            // Мох ещё и светится в темноте, как факел (используем ту же систему свечения)
+            if (block.type == BlockType::GLOWING_MOSS) {
+                lightSources.push_back({px + BLOCK_SIZE / 2.f, py + BLOCK_SIZE / 2.f});
             }
 
             // Горящий TNT мигает белым, мигание ускоряется по мере приближения взрыва
@@ -1539,6 +1748,9 @@ void Game::render() {
 
     for (const auto& cow : cows)
         cow.draw(window);
+
+    for (const auto& s : sheep)
+        s.draw(window);
 
     for (const auto& e : enemies)
         e.draw(window);

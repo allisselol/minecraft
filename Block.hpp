@@ -13,6 +13,7 @@ enum class BlockType {
     LEAVES_SNOWY,  // листва снежного биома — тёмно-зелёная, со снежной шапкой сверху
     SAND,
     GRAVEL,
+    GLOWING_MOSS, // светящийся мох в пещерах биома сакуры — светится, как факел
     TNT,
     TORCH,
     COAL_ORE,
@@ -34,6 +35,8 @@ enum class BlockType {
     DOOR_OPEN,     // открытая дверь (нижняя половина) — только состояние в мире
     DOOR_TOP,      // верхняя половина закрытой двери — ставится/ломается вместе с нижней автоматически
     DOOR_TOP_OPEN, // верхняя половина открытой двери
+    BED,      // изножье кровати — предмет в инвентаре и то, что ставится в клик
+    BED_HEAD, // изголовье — вторая половина, ставится/ломается вместе с BED автоматически
 
     // Эти четыре — не настоящие блоки, а предметы (еда и слитки из печи).
     // Их нельзя поставить в мир, только держать в инвентаре.
@@ -42,7 +45,8 @@ enum class BlockType {
     RAW_BEEF,
     COOKED_BEEF,
     IRON_INGOT,
-    GOLD_INGOT
+    GOLD_INGOT,
+    WOOL // шерсть — с овцы, идёт на кровать
 };
 
 struct Block {
@@ -55,7 +59,8 @@ struct Block {
     bool isItem() const {
         return type == BlockType::RAW_CHICKEN || type == BlockType::COOKED_CHICKEN ||
                type == BlockType::RAW_BEEF    || type == BlockType::COOKED_BEEF    ||
-               type == BlockType::IRON_INGOT  || type == BlockType::GOLD_INGOT;
+               type == BlockType::IRON_INGOT  || type == BlockType::GOLD_INGOT     ||
+               type == BlockType::WOOL;
     }
 
     bool isSolid() const {
@@ -72,6 +77,8 @@ struct Block {
     bool isDoorTop() const { return type == BlockType::DOOR_TOP || type == BlockType::DOOR_TOP_OPEN; }
     bool isDoorOpenState() const { return type == BlockType::DOOR_OPEN || type == BlockType::DOOR_TOP_OPEN; }
 
+    bool isBedPart() const { return type == BlockType::BED || type == BlockType::BED_HEAD; }
+
     bool isLadder() const { return type == BlockType::LADDER; }
 
     bool isLeaf() const {
@@ -84,7 +91,7 @@ struct Block {
     sf::Color getLeafTint() const {
         switch (type) {
             case BlockType::LEAVES_ACACIA: return sf::Color(110, 120, 55);  // приглушённый оливковый, не жёлтый
-            case BlockType::LEAVES_SAKURA: return sf::Color(215, 85, 150);  // насыщенный розовый/малиновый
+            case BlockType::LEAVES_SAKURA: return sf::Color(235, 110, 185);  // яркий розовый/малиновый, как на референсе
             case BlockType::LEAVES_SNOWY:  return sf::Color(35, 65, 35);    // тёмно-зелёная хвоя
             default:                       return sf::Color::White;        // без тона — обычная листва
         }
@@ -123,6 +130,7 @@ struct Block {
             case BlockType::LEAVES_SNOWY:  return sf::Color(35, 65, 35);
             case BlockType::SAND:   return sf::Color(208, 189, 137);
             case BlockType::GRAVEL: return sf::Color(128, 122, 116);
+            case BlockType::GLOWING_MOSS: return sf::Color(70, 150, 90);
             case BlockType::TNT:    return sf::Color(196, 40, 32);
             case BlockType::TORCH:  return sf::Color(200, 140, 60);
             case BlockType::COAL_ORE:    return sf::Color(90, 90, 92);
@@ -144,12 +152,15 @@ struct Block {
             case BlockType::DOOR_OPEN:
             case BlockType::DOOR_TOP:
             case BlockType::DOOR_TOP_OPEN: return sf::Color(133, 94, 52);
+            case BlockType::BED:
+            case BlockType::BED_HEAD: return sf::Color(190, 45, 45);
             case BlockType::RAW_CHICKEN:    return sf::Color(235, 180, 170);
             case BlockType::COOKED_CHICKEN: return sf::Color(180, 120, 60);
             case BlockType::RAW_BEEF:       return sf::Color(205, 70, 70);
             case BlockType::COOKED_BEEF:    return sf::Color(120, 65, 40);
             case BlockType::IRON_INGOT:     return sf::Color(220, 220, 225);
             case BlockType::GOLD_INGOT:     return sf::Color(250, 210, 60);
+            case BlockType::WOOL:           return sf::Color(235, 235, 230);
             default:                return sf::Color::Transparent;
         }
     }
@@ -207,6 +218,7 @@ struct Block {
             case BlockType::LEAVES_SAKURA: index = 4; break;
             case BlockType::LEAVES_SNOWY:  index = 4; break;
             case BlockType::STONE:  index = 7; break;   // камень
+            case BlockType::GLOWING_MOSS: index = 7; break; // тот же камень, зелёный тон при отрисовке
             case BlockType::GRAVEL: index = 8; break;   // булыжник/гравий
             case BlockType::SAND:   index = 9; break;   // песок
             case BlockType::TNT:    index = 11; break;  // TNT

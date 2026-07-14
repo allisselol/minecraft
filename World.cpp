@@ -89,6 +89,14 @@ bool World::isGravelPocket(int x, int y) const {
     return n > 1.05f; // делаем реже и мельче пещер
 }
 
+bool World::isMoss(int x, int y) const {
+    // Светящийся мох — только в биоме сакуры, отдельный шум, довольно редкий пятнами
+    if (biomeAt(x) != 2) return false;
+    float n = smoothNoise(x * 0.3f + y * 0.32f + (float)(seed % 444) + 3000.f)
+            + smoothNoise(x * 0.55f - y * 0.4f + 700.f);
+    return n > 1.1f;
+}
+
 BlockType World::oreAt(int x, int y, int surfaceY) const {
     int depth = y - surfaceY; // насколько глубоко под поверхностью
 
@@ -96,12 +104,22 @@ BlockType World::oreAt(int x, int y, int surfaceY) const {
     float vein = smoothNoise(x * 0.5f + y * 0.5f + (float)(seed % 333) + 2000.f)
                + smoothNoise(x * 0.9f - y * 0.7f + 400.f);
 
+    int biome = biomeAt(x);
+
+    // Акация (саванна) — угля заметно больше и он попадается ближе к поверхности
+    float coalThreshold = (biome == 1) ? 0.75f : 1.02f;
+    int   coalMinDepth  = (biome == 1) ? 3     : 6;
+
+    // Сакура — "кристаллы" (алмазная руда) встречаются гораздо чаще и не так глубоко
+    float diamondThreshold = (biome == 2) ? 1.05f : 1.35f;
+    int   diamondMinDepth  = (biome == 2) ? 20    : 40;
+
     // Каждый тип руды — своя редкость и диапазон глубин.
     // Проверяем от самой ценной/глубокой к самой частой.
-    if (depth > 40 && vein > 1.35f) return BlockType::DIAMOND_ORE;
+    if (depth > diamondMinDepth && vein > diamondThreshold) return BlockType::DIAMOND_ORE;
     if (depth > 30 && vein > 1.28f) return BlockType::GOLD_ORE;
     if (depth > 12 && vein > 1.15f) return BlockType::IRON_ORE;
-    if (depth > 6  && vein > 1.02f) return BlockType::COAL_ORE;
+    if (depth > coalMinDepth && vein > coalThreshold) return BlockType::COAL_ORE;
     return BlockType::AIR; // руды нет — останется обычный камень
 }
 

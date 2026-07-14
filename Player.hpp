@@ -14,6 +14,7 @@ private:
     bool  wasInWater = false;     // был ли в воде в прошлом кадре
     bool  justEnteredWater = false; // вошёл в воду именно в этом кадре (для звука плеска)
     float walkTimer; // время в текущем цикле ходьбы, для анимации ног
+    bool  sleeping = false; // спит ли сейчас (лежит на кровати) — во время сна не двигается
 
     static constexpr float GRAVITY    = 1200.f;
     static constexpr float JUMP_FORCE = -550.f;
@@ -62,6 +63,19 @@ public:
     float getWidth()  const { return width; }
     float getHeight() const { return height; }
     bool  isOnGround() const { return onGround; }
+    bool  isSleeping() const { return sleeping; }
+    // Укладывает игрока спать прямо на кровать. bedX/bedY — верхний левый угол
+    // клетки-изножья кровати (2 клетки в ширину, 1 в высоту) — не позиция стоя.
+    void startSleep(float bedX, float bedY) {
+        sleeping = true;
+        x = bedX; y = bedY;
+        vx = 0.f; vy = 0.f;
+        moveLeft = moveRight = false;
+    }
+    void wakeUp() {
+        sleeping = false;
+        y -= (float)BLOCK_SIZE; // "координаты кровати" — это уровень ног, а не верх стоящего игрока
+    }
     bool  isMoving()   const { return moveLeft || moveRight; }
     bool  isClimbing() const { return onLadderState; } // на лестнице ли сейчас (для звука шагов)
     bool  isClimbingMoving() const { return onLadderState && (wantUp || wantDown); } // реально лезет, не просто стоит
